@@ -17,21 +17,15 @@ import os
 # Use DATABASE_URL from environment (Railway) or fallback to local SQLite
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Debug logging
-print(f"🔍 DATABASE_URL from environment: {DATABASE_URL}")
-print(f"🔍 All environment variables: {list(os.environ.keys())}")
-
 if DATABASE_URL:
     # Production (Railway with PostgreSQL)
     # Railway provides postgres:// but SQLAlchemy needs postgresql://
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-    print(f"✅ Using PostgreSQL: {DATABASE_URL[:30]}...")
     engine = create_engine(DATABASE_URL, echo=False)
 else:
     # Local development (SQLite)
     DB_PATH = "/Users/diegomarmat/Chela/suppliers/data/suppliers.db"
-    print(f"⚠️ Using SQLite: {DB_PATH}")
     engine = create_engine(f"sqlite:///{DB_PATH}", echo=False)
 
 Base = declarative_base()
