@@ -1,0 +1,7 @@
+sqlalchemy==2.0.23
+streamlit==1.50.0
+pandas==2.1.4
+pillow==11.3.0
+pillow-heif==1.1.1
+reportlab==4.0.7
+psycopg2-binary==2.9.9
