@@ -8,7 +8,7 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
 from models import (
-    get_db, Supplier, Invoice, InvoiceItem, Product, PriceHistory, DashboardNotes
+    get_db, Supplier, Invoice, InvoiceItem, Product, PriceHistory, DashboardNotes, init_db
 )
 from sqlalchemy import func
 from PIL import Image
@@ -19,6 +19,9 @@ from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
+
+# Initialize database tables (create if not exists)
+init_db()
 
 # Register HEIF opener to enable HEIC support
 pillow_heif.register_heif_opener()
