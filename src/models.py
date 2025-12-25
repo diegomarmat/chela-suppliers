@@ -13,11 +13,21 @@ from sqlalchemy.orm import relationship, sessionmaker
 from datetime import datetime
 import os
 
-# Database path
-DB_PATH = "/Users/diegomarmat/Chela/suppliers/data/suppliers.db"
+# Database configuration
+# Use DATABASE_URL from environment (Railway) or fallback to local SQLite
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Create engine and base
-engine = create_engine(f"sqlite:///{DB_PATH}", echo=False)
+if DATABASE_URL:
+    # Production (Railway with PostgreSQL)
+    # Railway provides postgres:// but SQLAlchemy needs postgresql://
+    if DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    engine = create_engine(DATABASE_URL, echo=False)
+else:
+    # Local development (SQLite)
+    DB_PATH = "/Users/diegomarmat/Chela/suppliers/data/suppliers.db"
+    engine = create_engine(f"sqlite:///{DB_PATH}", echo=False)
+
 Base = declarative_base()
 SessionLocal = sessionmaker(bind=engine)
 
@@ -210,8 +220,11 @@ def init_db():
 
 if __name__ == "__main__":
     # Test database connection
-    print(f"Database path: {DB_PATH}")
-    print(f"Database exists: {os.path.exists(DB_PATH)}")
+    if DATABASE_URL:
+        print(f"Database: PostgreSQL (Railway)")
+    else:
+        print(f"Database path: {DB_PATH}")
+        print(f"Database exists: {os.path.exists(DB_PATH)}")
 
     # Test session
     db = next(get_db())
