@@ -889,7 +889,7 @@ def show_market_list():
 
     # TAB 1: VIEW PRODUCTS
     with tab1:
-        st.markdown("### 📋 All Products")
+        st.markdown("### 📋 Market List")
 
         # Filters
         col1, col2, col3 = st.columns(3)
@@ -1328,22 +1328,76 @@ def show_invoices():
     with tab1:
         st.markdown('<p class="sub-header">All Invoices</p>', unsafe_allow_html=True)
 
-        # Filter by supplier
-        db = next(get_db())
-        suppliers = db.query(Supplier).filter(Supplier.is_active == True).all()
-        supplier_names = ["All"] + [s.short_name for s in suppliers]
-        filter_supplier = st.selectbox("Filter by Supplier", supplier_names)
-        db.close()
+        # Filters
+        col1, col2, col3, col4, col5 = st.columns(5)
+
+        with col1:
+            # Supplier filter
+            db_temp = next(get_db())
+            suppliers = db_temp.query(Supplier).filter(Supplier.is_active == True).order_by(Supplier.short_name).all()
+            supplier_names = ["All"] + [s.short_name for s in suppliers]
+            db_temp.close()
+            filter_supplier = st.selectbox("Supplier", supplier_names, key="invoice_filter_supplier")
+
+        with col2:
+            # Category filter
+            categories = ["All", "Food", "Drinks", "Operational"]
+            filter_category = st.selectbox("Category", categories, key="invoice_filter_category")
+
+        with col3:
+            # Year filter
+            current_year = date.today().year
+            years = ["All"] + [current_year - 1, current_year, current_year + 1]
+            filter_year = st.selectbox("Year", years, key="invoice_filter_year")
+
+        with col4:
+            # Month filter
+            months = ["All"] + list(range(1, 13))
+            filter_month = st.selectbox(
+                "Month",
+                months,
+                format_func=lambda x: x if x == "All" else date(2025, x, 1).strftime('%B'),
+                key="invoice_filter_month"
+            )
+
+        with col5:
+            # Payment cycle filter
+            filter_payment_cycle = st.selectbox(
+                "Payment Cycle",
+                ["All", "Cash", "2-week", "Monthly"],
+                key="invoice_filter_payment_cycle"
+            )
 
         # Get invoices
         db = next(get_db())
         try:
-            query = db.query(Invoice)
+            from sqlalchemy import extract
+            from sqlalchemy.orm import joinedload
 
+            query = db.query(Invoice).options(joinedload(Invoice.supplier))
+
+            # Apply supplier filter
             if filter_supplier != "All":
                 supplier = db.query(Supplier).filter(Supplier.short_name == filter_supplier).first()
                 if supplier:
                     query = query.filter(Invoice.supplier_id == supplier.id)
+
+            # Apply category filter
+            if filter_category != "All":
+                query = query.join(Supplier).filter(Supplier.category == filter_category)
+
+            # Apply year filter
+            if filter_year != "All":
+                query = query.filter(extract('year', Invoice.invoice_date) == filter_year)
+
+            # Apply month filter
+            if filter_month != "All":
+                query = query.filter(extract('month', Invoice.invoice_date) == filter_month)
+
+            # Apply payment cycle filter
+            if filter_payment_cycle != "All":
+                payment_term_map = {"Cash": "cash", "2-week": "2week", "Monthly": "monthly"}
+                query = query.join(Supplier).filter(Supplier.payment_terms == payment_term_map[filter_payment_cycle])
 
             invoices = query.order_by(Invoice.invoice_date.desc()).all()
 
@@ -1670,7 +1724,7 @@ def show_invoices():
 
                                 # Calculate actual price paid (including PPN if applicable)
                                 actual_price = item['unit_price']
-                                if supplier.ppn_handling == "Added":
+                                if supplier.ppn_handling == "added":
                                     # For "PPN Added" suppliers, include 11% tax in the tracked price
                                     actual_price = item['unit_price'] * 1.11
 
