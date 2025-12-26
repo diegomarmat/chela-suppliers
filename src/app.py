@@ -149,7 +149,7 @@ def generate_payment_schedule_pdf(report_data, month_name, cycle_name, total_amo
         'CustomTitle',
         parent=styles['Heading1'],
         fontSize=18,
-        textColor=colors.HexColor('#2E4057'),
+        textColor=colors.HexColor('#2C1810'),
         spaceAfter=30,
         alignment=1  # Center
     )
@@ -157,13 +157,13 @@ def generate_payment_schedule_pdf(report_data, month_name, cycle_name, total_amo
         'CustomSubtitle',
         parent=styles['Normal'],
         fontSize=12,
-        textColor=colors.HexColor('#048A81'),
+        textColor=colors.HexColor('#5D4037'),
         spaceAfter=20,
         alignment=1  # Center
     )
 
     # Title
-    title = Paragraph("CHELA RESTAURANT<br/>Payment Schedule", title_style)
+    title = Paragraph("CHELA<br/>Payment Summary", title_style)
     elements.append(title)
 
     # Subtitle with filters
@@ -172,47 +172,114 @@ def generate_payment_schedule_pdf(report_data, month_name, cycle_name, total_amo
     elements.append(subtitle)
     elements.append(Spacer(1, 0.3 * inch))
 
-    # Table data
-    table_data = [['Supplier', 'Payment Terms', 'Invoices', 'Total Amount']]
-    for row in report_data:
-        table_data.append([
-            row['Supplier'],
-            row['Payment Terms'],
-            str(row['Invoices']),
-            row['Total Amount']
-        ])
+    # Table data - group by category if "All" selected
+    if category_filter == "All":
+        # Group by category
+        from collections import defaultdict
+        categories = defaultdict(list)
+        for row in report_data:
+            categories[row.get('Category', 'Other')].append(row)
 
-    # Create table
-    table = Table(table_data, colWidths=[2.5*inch, 1.5*inch, 1*inch, 2*inch])
-    table.setStyle(TableStyle([
-        # Header styling
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#048A81')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('ALIGN', (2, 0), (2, -1), 'CENTER'),  # Invoices column centered
-        ('ALIGN', (3, 0), (3, -1), 'RIGHT'),   # Amount column right-aligned
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('TOPPADDING', (0, 0), (-1, 0), 12),
+        # Create table for each category
+        for category_name in sorted(categories.keys()):
+            category_rows = categories[category_name]
 
-        # Data rows styling
-        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.grey),
-        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-        ('FONTSIZE', (0, 1), (-1, -1), 10),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.beige]),
-        ('TOPPADDING', (0, 1), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
-    ]))
+            # Category header
+            category_header = Paragraph(f"<b>{category_name}</b>", subtitle_style)
+            elements.append(category_header)
+            elements.append(Spacer(1, 0.1 * inch))
 
-    elements.append(table)
-    elements.append(Spacer(1, 0.5 * inch))
+            # Table data for this category
+            table_data = [['Supplier', 'Payment Terms', 'Total Amount']]
+            category_subtotal = 0
+
+            for row in category_rows:
+                table_data.append([
+                    row['Supplier'],
+                    row['Payment Terms'],
+                    row['Total Amount']
+                ])
+                category_subtotal += row.get('Total_Raw', 0)
+
+            # Add subtotal row
+            table_data.append([
+                'Subtotal',
+                '',
+                format_currency(category_subtotal)
+            ])
+
+            # Create table
+            table = Table(table_data, colWidths=[3*inch, 2*inch, 2*inch])
+            subtotal_row_idx = len(table_data) - 1
+
+            table.setStyle(TableStyle([
+                # Header styling
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#5D4037')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('TOPPADDING', (0, 0), (-1, 0), 12),
+
+                # Data rows styling
+                ('BACKGROUND', (0, 1), (-1, -2), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+                ('FONTNAME', (0, 1), (-1, -2), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -2), 10),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, colors.beige]),
+                ('TOPPADDING', (0, 1), (-1, -2), 8),
+                ('BOTTOMPADDING', (0, 1), (-1, -2), 8),
+
+                # Subtotal row styling
+                ('BACKGROUND', (0, subtotal_row_idx), (-1, subtotal_row_idx), colors.HexColor('#E0E0E0')),
+                ('FONTNAME', (0, subtotal_row_idx), (-1, subtotal_row_idx), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, subtotal_row_idx), (-1, subtotal_row_idx), 11),
+            ]))
+
+            elements.append(table)
+            elements.append(Spacer(1, 0.3 * inch))
+
+    else:
+        # Single category - no grouping needed
+        table_data = [['Supplier', 'Payment Terms', 'Total Amount']]
+        for row in report_data:
+            table_data.append([
+                row['Supplier'],
+                row['Payment Terms'],
+                row['Total Amount']
+            ])
+
+        # Create table
+        table = Table(table_data, colWidths=[3*inch, 2*inch, 2*inch])
+        table.setStyle(TableStyle([
+            # Header styling
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#5D4037')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('TOPPADDING', (0, 0), (-1, 0), 12),
+
+            # Data rows styling
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 10),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.beige]),
+            ('TOPPADDING', (0, 1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+        ]))
+
+        elements.append(table)
+        elements.append(Spacer(1, 0.5 * inch))
 
     # Summary section
     summary_data = [
-        ['Total Payment Amount', format_currency(total_amount)],
-        ['Suppliers Needing Review', f"{review_count} ⚠️" if review_count > 0 else "0 ✅"]
+        ['Total Payment Amount', format_currency(total_amount)]
     ]
     summary_table = Table(summary_data, colWidths=[3*inch, 3*inch])
     summary_table.setStyle(TableStyle([
@@ -584,7 +651,8 @@ def show_suppliers():
                         'Short Name': sup.short_name,
                         'Category': sup.category or '-',
                         'Payment Terms': sup.payment_terms.upper(),
-                        'Delivery Days': sup.delivery_days or '-'
+                        'Delivery Days': sup.delivery_days or '-',
+                        'PPN Handling': sup.ppn_handling.capitalize()
                     })
 
                 df = pd.DataFrame(supplier_data)
@@ -964,7 +1032,7 @@ def show_market_list():
 
                 if supplier_options:
                     selected_supplier = st.selectbox(
-                        "Preferred Supplier *",
+                        "Supplier *",
                         options=list(supplier_options.keys()),
                         key="new_product_supplier"
                     )
@@ -1122,7 +1190,7 @@ def show_market_list():
                             current_supplier = next((s.short_name for s in suppliers if s.id == product.preferred_supplier_id), None)
 
                             edit_supplier = st.selectbox(
-                                "Preferred Supplier *",
+                                "Supplier *",
                                 options=list(supplier_options.keys()),
                                 index=list(supplier_options.keys()).index(current_supplier) if current_supplier else 0
                             )
@@ -1600,10 +1668,16 @@ def show_invoices():
                                 )
                                 db.add(invoice_item)
 
+                                # Calculate actual price paid (including PPN if applicable)
+                                actual_price = item['unit_price']
+                                if supplier.ppn_handling == "Added":
+                                    # For "PPN Added" suppliers, include 11% tax in the tracked price
+                                    actual_price = item['unit_price'] * 1.11
+
                                 # Update product current price if this is newer
                                 product = db.query(Product).filter(Product.id == item['product_id']).first()
                                 if product and (not product.current_price_date or invoice_date >= product.current_price_date):
-                                    product.current_price = item['unit_price']
+                                    product.current_price = actual_price
                                     product.current_price_date = invoice_date
 
                                 # ALWAYS create price history record (for tracking price changes over time)
@@ -1611,7 +1685,7 @@ def show_invoices():
                                     product_id=item['product_id'],
                                     supplier_id=supplier.id,
                                     invoice_id=new_invoice.id,
-                                    price=item['unit_price'],
+                                    price=actual_price,
                                     date=invoice_date
                                 )
                                 db.add(price_history_record)
@@ -1985,10 +2059,10 @@ def show_reports():
     """Reports page - Analytics and reports"""
     st.markdown('<p class="main-header">📊 Reports</p>', unsafe_allow_html=True)
 
-    tab1, tab2 = st.tabs(["Payment Schedule", "Supplier Spend Analysis"])
+    tab1, tab2 = st.tabs(["Payment Summary", "Supplier Spend Analysis"])
 
     with tab1:
-        st.markdown('<p class="sub-header">Payment Schedule Report</p>', unsafe_allow_html=True)
+        st.markdown('<p class="sub-header">Payment Summary Report</p>', unsafe_allow_html=True)
         st.caption("Generate payment lists for Marcella - grouped by payment due dates")
 
         # Filters
@@ -2057,7 +2131,8 @@ def show_reports():
                             'total': 0,
                             'count': 0,
                             'needs_review': False,
-                            'payment_terms': inv.supplier.payment_terms
+                            'payment_terms': inv.supplier.payment_terms,
+                            'category': inv.supplier.category
                         }
 
                     supplier_data[supplier_name]['total'] += inv.total_amount
@@ -2076,8 +2151,9 @@ def show_reports():
                     report_data.append({
                         'Supplier': supplier_display,
                         'Payment Terms': data['payment_terms'].upper(),
-                        'Invoices': data['count'],
-                        'Total Amount': format_currency(data['total'])
+                        'Total Amount': format_currency(data['total']),
+                        'Category': data['category'],
+                        'Total_Raw': data['total']  # Keep raw number for subtotal calculations
                     })
 
                 df = pd.DataFrame(report_data)
@@ -2099,39 +2175,27 @@ def show_reports():
 
                 # Download buttons
                 st.markdown("---")
-                st.markdown("**📥 Download Payment Schedule**")
-                col_dl1, col_dl2 = st.columns(2)
+                st.markdown("**📥 Download Payment Summary**")
 
                 cycle_name = payment_cycle if payment_cycle != "All" else "All cycles"
                 month_name = date(selected_year, selected_month, 1).strftime('%B %Y')
 
-                with col_dl1:
-                    # CSV download
-                    st.download_button(
-                        label="Download CSV",
-                        data=df.to_csv(index=False),
-                        file_name=f"payment_schedule_{month_name.replace(' ', '_')}_{cycle_name.replace(' ', '_')}.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
-
-                with col_dl2:
-                    # PDF download
-                    pdf_buffer = generate_payment_schedule_pdf(
-                        report_data,
-                        month_name,
-                        cycle_name,
-                        total_amount,
-                        review_count,
-                        filter_category
-                    )
-                    st.download_button(
-                        label="Download PDF",
-                        data=pdf_buffer,
-                        file_name=f"payment_schedule_{month_name.replace(' ', '_')}_{cycle_name.replace(' ', '_')}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
+                # PDF download
+                pdf_buffer = generate_payment_schedule_pdf(
+                    report_data,
+                    month_name,
+                    cycle_name,
+                    total_amount,
+                    review_count,
+                    filter_category
+                )
+                st.download_button(
+                    label="📄 Download PDF",
+                    data=pdf_buffer,
+                    file_name=f"payment_summary_{month_name.replace(' ', '_')}_{cycle_name.replace(' ', '_')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
 
             else:
                 month_name = date(selected_year, selected_month, 1).strftime('%B %Y')
