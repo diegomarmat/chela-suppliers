@@ -23,6 +23,28 @@ from reportlab.lib.units import inch
 # Initialize database tables (create if not exists)
 init_db()
 
+# Auto-stamp Alembic on first deployment (one-time setup)
+try:
+    from alembic.config import Config
+    from alembic import command
+    from alembic.script import ScriptDirectory
+    from alembic.runtime.migration import MigrationContext
+    from models import engine
+
+    # Check if database has been stamped with baseline migration
+    with engine.connect() as conn:
+        context = MigrationContext.configure(conn)
+        current_rev = context.get_current_revision()
+
+        if current_rev is None:
+            # Database not stamped yet - stamp it with baseline
+            alembic_cfg = Config("alembic.ini")
+            command.stamp(alembic_cfg, "head")
+            print("✅ Alembic database stamped with baseline migration")
+except Exception as e:
+    # If anything fails, just continue (don't break the app)
+    print(f"⚠️ Alembic auto-stamp skipped: {e}")
+
 # Register HEIF opener to enable HEIC support
 pillow_heif.register_heif_opener()
 
