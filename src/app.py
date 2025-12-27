@@ -959,12 +959,18 @@ def show_market_list():
                         if prod.unit_size_measurement:
                             measurement_unit = prod.unit_size_measurement
 
+                    # Format unit size (e.g., "1000 ml" for bottles)
+                    unit_size_display = '-'
+                    if prod.unit_size and prod.unit_size_measurement:
+                        unit_size_display = f"{int(prod.unit_size) if prod.unit_size == int(prod.unit_size) else prod.unit_size} {prod.unit_size_measurement}"
+
                     product_data.append({
                         'Product Name': product_name,
                         'Brand': prod.brand or '-',
                         'Category': prod.category or '-',
                         'Unit': prod.unit,
                         'Measurement Unit': measurement_unit,
+                        'Size': unit_size_display,
                         'Current Price': format_currency(prod.current_price) if prod.current_price else '-',
                         'Supplier': prod.supplier.short_name if prod.supplier else '-',
                         'Notes': prod.notes[:30] + '...' if prod.notes and len(prod.notes) > 30 else (prod.notes or '-')
