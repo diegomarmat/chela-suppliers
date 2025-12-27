@@ -228,25 +228,6 @@ def get_db():
 
 def init_db():
     """Initialize database tables (if not exists)"""
-    # Check if migration is needed (old schema exists)
-    from sqlalchemy import inspect, text
-    inspector = inspect(engine)
-
-    if 'products' in inspector.get_table_names():
-        # Check if old schema (has 'name' column instead of 'short_name')
-        columns = [col['name'] for col in inspector.get_columns('products')]
-
-        if 'name' in columns and 'short_name' not in columns:
-            print("🔄 Old schema detected - running automatic migration...")
-
-            with engine.connect() as conn:
-                # Drop and recreate products table
-                conn.execute(text("DROP TABLE IF EXISTS price_history CASCADE"))
-                conn.execute(text("DROP TABLE IF EXISTS invoice_items CASCADE"))
-                conn.execute(text("DROP TABLE IF EXISTS products CASCADE"))
-                conn.commit()
-                print("✅ Old tables dropped")
-
     Base.metadata.create_all(bind=engine)
     print("✅ Database initialized successfully")
 
