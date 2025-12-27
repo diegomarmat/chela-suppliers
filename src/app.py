@@ -1109,21 +1109,15 @@ def show_market_list():
                             save_unit_size = None
                             save_unit_size_measurement = None
 
-                            # Auto-set for exact units
+                            # Auto-set ONLY for kg and liter (size is in the name)
                             if unit == 'kg':
                                 save_unit_size = 1000
                                 save_unit_size_measurement = 'g'
                             elif unit == 'liter':
                                 save_unit_size = 1000
                                 save_unit_size_measurement = 'ml'
-                            elif unit == 'gram':
-                                save_unit_size = 1
-                                save_unit_size_measurement = 'g'
-                            elif unit == 'ml':
-                                save_unit_size = 1
-                                save_unit_size_measurement = 'ml'
-                            # Manual input for non-exact units
-                            elif unit in ['pcs', 'box', 'ctn', 'pack', 'bottle']:
+                            # Manual input for all other units (gram, ml, pcs, bottle, etc.)
+                            elif unit in ['gram', 'ml', 'pcs', 'box', 'ctn', 'pack', 'bottle']:
                                 if unit_size > 0 and unit_size_measurement:
                                     save_unit_size = unit_size
                                     save_unit_size_measurement = unit_size_measurement
@@ -1312,21 +1306,15 @@ def show_market_list():
                                     product_to_update.notes = edit_notes if edit_notes else None
 
                                     # Set unit size based on unit type
-                                    # Auto-set for exact units
+                                    # Auto-set ONLY for kg and liter (size is in the name)
                                     if edit_unit == 'kg':
                                         product_to_update.unit_size = 1000
                                         product_to_update.unit_size_measurement = 'g'
                                     elif edit_unit == 'liter':
                                         product_to_update.unit_size = 1000
                                         product_to_update.unit_size_measurement = 'ml'
-                                    elif edit_unit == 'gram':
-                                        product_to_update.unit_size = 1
-                                        product_to_update.unit_size_measurement = 'g'
-                                    elif edit_unit == 'ml':
-                                        product_to_update.unit_size = 1
-                                        product_to_update.unit_size_measurement = 'ml'
-                                    # Manual input for non-exact units
-                                    elif edit_unit in ['pcs', 'box', 'ctn', 'pack', 'bottle']:
+                                    # Manual input for all other units (gram, ml, pcs, bottle, etc.)
+                                    elif edit_unit in ['gram', 'ml', 'pcs', 'box', 'ctn', 'pack', 'bottle']:
                                         if edit_unit_size > 0 and edit_unit_size_measurement:
                                             product_to_update.unit_size = edit_unit_size
                                             product_to_update.unit_size_measurement = edit_unit_size_measurement
