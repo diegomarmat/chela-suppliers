@@ -922,11 +922,11 @@ def show_market_list():
         db = next(get_db())
         try:
             query = db.query(Product).join(
-                Supplier, Product.preferred_supplier_id == Supplier.id, isouter=True
+                Supplier, Product.supplier_id == Supplier.id, isouter=True
             )
 
             if search_term:
-                query = query.filter(Product.name.ilike(f"%{search_term}%"))
+                query = query.filter(Product.short_name.ilike(f"%{search_term}%"))
 
             if category_filter != "All":
                 query = query.filter(Product.category == category_filter)
@@ -934,15 +934,15 @@ def show_market_list():
             if supplier_filter != "All":
                 query = query.filter(Supplier.short_name == supplier_filter)
 
-            products = query.order_by(Product.category, Product.name).all()
+            products = query.order_by(Product.category, Product.short_name).all()
 
             if products:
                 product_data = []
                 for prod in products:
                     # Add backup indicator to product name
-                    product_name = prod.name
+                    product_name = prod.short_name
                     if prod.is_backup:
-                        product_name = f"🔄 {prod.name}"
+                        product_name = f"🔄 {prod.short_name}"
 
                     # Determine measurement unit
                     measurement_unit = '-'
@@ -961,11 +961,12 @@ def show_market_list():
 
                     product_data.append({
                         'Product Name': product_name,
+                        'Brand': prod.brand or '-',
                         'Category': prod.category or '-',
                         'Unit': prod.unit,
                         'Measurement Unit': measurement_unit,
                         'Current Price': format_currency(prod.current_price) if prod.current_price else '-',
-                        'Supplier': prod.preferred_supplier.short_name if prod.preferred_supplier else '-',
+                        'Supplier': prod.supplier.short_name if prod.supplier else '-',
                         'Notes': prod.notes[:30] + '...' if prod.notes and len(prod.notes) > 30 else (prod.notes or '-')
                     })
 
@@ -991,7 +992,16 @@ def show_market_list():
             col1, col2 = st.columns(2)
 
             with col1:
-                product_name = st.text_input("Product Name *", key="new_product_name")
+                product_name = st.text_input(
+                    "Short Name *",
+                    key="new_product_name",
+                    help="Short, readable name (e.g., 'Cheese Block', 'Tomatoes')"
+                )
+                brand = st.text_input(
+                    "Brand",
+                    key="new_product_brand",
+                    help="Optional - brand name (e.g., 'BECA', 'Président'). Leave empty for generic items like vegetables."
+                )
                 category = st.selectbox(
                     "Category *",
                     ["Food", "Drinks", "Operational"],
@@ -1063,7 +1073,7 @@ def show_market_list():
                         db = next(get_db())
 
                         # Check if product already exists
-                        existing = db.query(Product).filter(Product.name == product_name).first()
+                        existing = db.query(Product).filter(Product.short_name == product_name).first()
                         if existing:
                             st.error(f"❌ Product '{product_name}' already exists!")
                         else:
@@ -1076,12 +1086,14 @@ def show_market_list():
                                     save_unit_size_measurement = unit_size_measurement
 
                             new_product = Product(
-                                name=product_name,
+                                short_name=product_name,
+                                brand=brand if brand else None,
+                                invoice_name=None,  # Will be populated by OCR later
                                 category=category,
                                 unit=unit,
                                 current_price=None,  # Price will be set from first invoice
                                 current_price_date=None,
-                                preferred_supplier_id=supplier_options[selected_supplier],
+                                supplier_id=supplier_options[selected_supplier],
                                 is_backup=is_backup,
                                 unit_size=save_unit_size,
                                 unit_size_measurement=save_unit_size_measurement,
@@ -1108,11 +1120,11 @@ def show_market_list():
         # Get all products
         db = next(get_db())
         from sqlalchemy.orm import joinedload
-        products = db.query(Product).options(joinedload(Product.preferred_supplier)).order_by(Product.name).all()
+        products = db.query(Product).options(joinedload(Product.supplier)).order_by(Product.short_name).all()
 
         # Build options before closing db
         product_options = {
-            f"{p.name} ({p.preferred_supplier.short_name if p.preferred_supplier else 'No supplier'})": p.id
+            f"{p.short_name} ({p.supplier.short_name if p.supplier else 'No supplier'})": p.id
             for p in products
         }
         db.close()
@@ -1141,7 +1153,16 @@ def show_market_list():
                         col1, col2 = st.columns(2)
 
                         with col1:
-                            edit_name = st.text_input("Product Name *", value=product.name)
+                            edit_name = st.text_input(
+                                "Short Name *",
+                                value=product.short_name,
+                                help="Short, readable name (e.g., 'Cheese Block', 'Tomatoes')"
+                            )
+                            edit_brand = st.text_input(
+                                "Brand",
+                                value=product.brand if product.brand else "",
+                                help="Optional - brand name (e.g., 'BECA', 'Président'). Leave empty for generic items."
+                            )
                             edit_category = st.selectbox(
                                 "Category *",
                                 ["Food", "Drinks", "Operational"],
@@ -1187,7 +1208,7 @@ def show_market_list():
                             db.close()
 
                             supplier_options = {s.short_name: s.id for s in suppliers}
-                            current_supplier = next((s.short_name for s in suppliers if s.id == product.preferred_supplier_id), None)
+                            current_supplier = next((s.short_name for s in suppliers if s.id == product.supplier_id), None)
 
                             edit_supplier = st.selectbox(
                                 "Supplier *",
@@ -1230,18 +1251,19 @@ def show_market_list():
                                     product_to_update = db.query(Product).filter(Product.id == product.id).first()
 
                                     # Check if new name conflicts with existing product
-                                    if edit_name != product_to_update.name:
-                                        existing = db.query(Product).filter(Product.name == edit_name).first()
+                                    if edit_name != product_to_update.short_name:
+                                        existing = db.query(Product).filter(Product.short_name == edit_name).first()
                                         if existing:
                                             st.error(f"❌ Product '{edit_name}' already exists!")
                                             db.close()
                                             return
 
                                     # Update the product
-                                    product_to_update.name = edit_name
+                                    product_to_update.short_name = edit_name
+                                    product_to_update.brand = edit_brand if edit_brand else None
                                     product_to_update.category = edit_category
                                     product_to_update.unit = edit_unit
-                                    product_to_update.preferred_supplier_id = supplier_options[edit_supplier]
+                                    product_to_update.supplier_id = supplier_options[edit_supplier]
                                     product_to_update.is_backup = edit_is_backup
                                     # current_price and current_price_date are NOT updated here - only from invoices
                                     product_to_update.notes = edit_notes if edit_notes else None
@@ -1309,7 +1331,7 @@ def show_market_list():
                                 # Now delete the product
                                 db.delete(product)
                                 db.commit()
-                                st.success(f"✅ Product '{product.name}' deleted successfully!")
+                                st.success(f"✅ Product '{product.short_name}' deleted successfully!")
                                 st.rerun()
 
                             except Exception as e:
@@ -1529,8 +1551,8 @@ def show_invoices():
         # Get products for this supplier from Market List
         db = next(get_db())
         supplier_products = db.query(Product).filter(
-            Product.preferred_supplier_id == selected_supplier_obj.id
-        ).order_by(Product.name).all()
+            Product.supplier_id == selected_supplier_obj.id
+        ).order_by(Product.short_name).all()
         db.close()
 
         if not supplier_products:
@@ -1543,12 +1565,9 @@ def show_invoices():
             # Build product options with size/measurement if available
             product_options = {}
             for p in supplier_products:
-                if p.unit_size and p.unit_size_measurement:
-                    # Show size for non-exact units (e.g., "Olive Oil (bottle - 1000ml)")
-                    display_name = f"{p.name} ({p.unit} - {p.unit_size}{p.unit_size_measurement})"
-                else:
-                    # Regular display for exact units (e.g., "Tomatoes (kg)")
-                    display_name = f"{p.name} ({p.unit})"
+                # Use the model's invoice_dropdown_name() method
+                # Format: "Short Name (Brand - unit)" or "Short Name (unit)"
+                display_name = p.invoice_dropdown_name()
                 product_options[display_name] = p
 
             with col_item1:
@@ -1586,7 +1605,7 @@ def show_invoices():
                             price = float(item_price.replace('.', '').replace(',', ''))
 
                             st.session_state.line_items.append({
-                                'name': selected_product.name,
+                                'name': selected_product.short_name,
                                 'quantity': qty,
                                 'unit': selected_product.unit,
                                 'unit_price': price,
@@ -1867,8 +1886,8 @@ def show_invoices():
             # Get products for this supplier from Market List
             db = next(get_db())
             supplier_products = db.query(Product).filter(
-                Product.preferred_supplier_id == invoice_to_edit.supplier.id
-            ).order_by(Product.name).all()
+                Product.supplier_id == invoice_to_edit.supplier.id
+            ).order_by(Product.short_name).all()
             db.close()
 
             if not supplier_products:
@@ -1881,12 +1900,9 @@ def show_invoices():
                 # Build product options with size/measurement if available
                 product_options = {}
                 for p in supplier_products:
-                    if p.unit_size and p.unit_size_measurement:
-                        # Show size for non-exact units (e.g., "Olive Oil (bottle - 1000ml)")
-                        display_name = f"{p.name} ({p.unit} - {p.unit_size}{p.unit_size_measurement})"
-                    else:
-                        # Regular display for exact units (e.g., "Tomatoes (kg)")
-                        display_name = f"{p.name} ({p.unit})"
+                    # Use the model's invoice_dropdown_name() method
+                    # Format: "Short Name (Brand - unit)" or "Short Name (unit)"
+                    display_name = p.invoice_dropdown_name()
                     product_options[display_name] = p
 
                 with col_item1:
@@ -1924,7 +1940,7 @@ def show_invoices():
                                 price = float(edit_item_price.replace('.', '').replace(',', ''))
 
                                 st.session_state.edit_line_items.append({
-                                    'name': selected_product.name,
+                                    'name': selected_product.short_name,
                                     'quantity': qty,
                                     'unit': selected_product.unit,
                                     'unit_price': price,
@@ -2055,14 +2071,14 @@ def show_invoices():
                             if st.session_state.edit_line_items:
                                 for item in st.session_state.edit_line_items:
                                     # Check if product exists, create if not
-                                    product = db.query(Product).filter(Product.name == item['name']).first()
+                                    product = db.query(Product).filter(Product.short_name == item['name']).first()
                                     if not product:
                                         product = Product(
                                             name=item['name'],
                                             unit=item['unit'],
                                             current_price=item['unit_price'],
                                             current_price_date=invoice_date,
-                                            preferred_supplier_id=supplier.id
+                                            supplier_id=supplier.id
                                         )
                                         db.add(product)
                                         db.flush()
@@ -2109,9 +2125,9 @@ def show_invoices():
                         db.close()
 
 
-def show_reports():
-    """Reports page - Analytics and reports"""
-    st.markdown('<p class="main-header">📊 Reports</p>', unsafe_allow_html=True)
+def show_payments():
+    """Payments page - Payment summary for Astik"""
+    st.markdown('<p class="main-header">💳 Payments</p>', unsafe_allow_html=True)
 
     tab1, tab2 = st.tabs(["Payment Summary", "Supplier Spend Analysis"])
 
@@ -2301,6 +2317,237 @@ def show_reports():
             db.close()
 
 
+def show_analytics(analytics_page):
+    """Analytics page - Purchase tracking and price analysis"""
+    st.markdown('<p class="main-header">📈 Analytics</p>', unsafe_allow_html=True)
+
+    if analytics_page == "Purchase Tracking":
+        show_purchase_tracking()
+    elif analytics_page == "Price Tracking":
+        show_price_tracking()
+
+
+def show_purchase_tracking():
+    """Purchase Tracking - Monitor quantities ordered over time"""
+    st.markdown('<p class="sub-header">📦 Purchase Tracking</p>', unsafe_allow_html=True)
+    st.caption("Deep dive into specific products - track quantities, orders, and prices across time periods")
+
+    # Initialize persistent session state for filters
+    if 'pt_filter_category' not in st.session_state:
+        st.session_state.pt_filter_category = "All"
+    if 'pt_filter_supplier' not in st.session_state:
+        st.session_state.pt_filter_supplier = "All"
+    if 'pt_selected_product' not in st.session_state:
+        st.session_state.pt_selected_product = None
+    if 'period_count' not in st.session_state:
+        st.session_state.period_count = 1
+    if 'pt_period_dates' not in st.session_state:
+        st.session_state.pt_period_dates = {}
+
+    # STEP 1: Product Selection
+    st.markdown("### 🔍 Step 1: Select Product")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        # Category filter
+        categories = ["All", "Food", "Drinks", "Operational"]
+        category_index = categories.index(st.session_state.pt_filter_category) if st.session_state.pt_filter_category in categories else 0
+        filter_category = st.selectbox("Category", categories, index=category_index, key="pt_category")
+        if filter_category != st.session_state.pt_filter_category:
+            st.session_state.pt_filter_category = filter_category
+            st.session_state.pt_selected_product = None  # Reset product when category changes
+
+    with col2:
+        # Supplier filter - filtered by category
+        db_temp = next(get_db())
+
+        # Get suppliers that have products in the selected category
+        supplier_query = db_temp.query(Supplier).join(
+            Product, Product.supplier_id == Supplier.id
+        ).filter(Supplier.is_active == True)
+
+        if filter_category != "All":
+            supplier_query = supplier_query.filter(Product.category == filter_category)
+
+        suppliers = supplier_query.distinct().order_by(Supplier.short_name).all()
+        supplier_names = ["All"] + [s.short_name for s in suppliers]
+        db_temp.close()
+
+        # Reset supplier if it's not in the filtered list
+        if st.session_state.pt_filter_supplier not in supplier_names:
+            st.session_state.pt_filter_supplier = "All"
+
+        supplier_index = supplier_names.index(st.session_state.pt_filter_supplier) if st.session_state.pt_filter_supplier in supplier_names else 0
+        filter_supplier = st.selectbox("Supplier", supplier_names, index=supplier_index, key="pt_supplier")
+        if filter_supplier != st.session_state.pt_filter_supplier:
+            st.session_state.pt_filter_supplier = filter_supplier
+            st.session_state.pt_selected_product = None  # Reset product when supplier changes
+
+    with col3:
+        # Get products based on filters
+        db_temp = next(get_db())
+        query = db_temp.query(Product).join(Supplier, Product.supplier_id == Supplier.id)
+
+        if filter_category != "All":
+            query = query.filter(Product.category == filter_category)
+        if filter_supplier != "All":
+            query = query.filter(Supplier.short_name == filter_supplier)
+
+        products = query.order_by(Product.short_name).all()
+        db_temp.close()
+
+        if products:
+            product_names = [p.short_name for p in products]
+            # Find index of previously selected product
+            product_index = 0
+            if st.session_state.pt_selected_product and st.session_state.pt_selected_product in product_names:
+                product_index = product_names.index(st.session_state.pt_selected_product)
+
+            selected_product_name = st.selectbox("Product", product_names, index=product_index, key="pt_product")
+            st.session_state.pt_selected_product = selected_product_name
+            selected_product = next(p for p in products if p.short_name == selected_product_name)
+        else:
+            st.warning("No products match your filters")
+            selected_product = None
+
+    if selected_product:
+        # STEP 2: Define Comparison Periods
+        st.markdown("---")
+        st.markdown("### 📅 Step 2: Define Time Periods")
+
+        from datetime import timedelta
+
+        # Collect period dates
+        periods = []
+
+        for i in range(st.session_state.period_count):
+            period_num = i + 1
+            st.markdown(f"**Period {period_num}**")
+
+            col1, col2, col3 = st.columns([2, 2, 1])
+            with col1:
+                # Get saved date or use default
+                saved_start_key = f"period_{period_num}_start_saved"
+                if saved_start_key in st.session_state.pt_period_dates:
+                    default_start = st.session_state.pt_period_dates[saved_start_key]
+                else:
+                    default_start = date.today() - timedelta(days=30 * (period_num))
+
+                start = st.date_input(
+                    "Start Date",
+                    default_start,
+                    key=f"period_{period_num}_start"
+                )
+                st.session_state.pt_period_dates[saved_start_key] = start
+
+            with col2:
+                # Get saved date or use default
+                saved_end_key = f"period_{period_num}_end_saved"
+                if saved_end_key in st.session_state.pt_period_dates:
+                    default_end = st.session_state.pt_period_dates[saved_end_key]
+                else:
+                    default_end = date.today() - timedelta(days=30 * (period_num - 1))
+                    if period_num == 1:
+                        default_end = date.today()
+
+                end = st.date_input(
+                    "End Date",
+                    default_end,
+                    key=f"period_{period_num}_end"
+                )
+                st.session_state.pt_period_dates[saved_end_key] = end
+
+            with col3:
+                # Remove button (only for periods > 1)
+                if period_num > 1:
+                    if st.button("🗑️ Remove", key=f"remove_{period_num}"):
+                        # Clean up saved dates for removed period
+                        removed_start_key = f"period_{period_num}_start_saved"
+                        removed_end_key = f"period_{period_num}_end_saved"
+                        if removed_start_key in st.session_state.pt_period_dates:
+                            del st.session_state.pt_period_dates[removed_start_key]
+                        if removed_end_key in st.session_state.pt_period_dates:
+                            del st.session_state.pt_period_dates[removed_end_key]
+                        st.session_state.period_count -= 1
+                        st.rerun()
+
+            periods.append({'start': start, 'end': end})
+
+        # Add period button
+        if st.button("➕ Add Another Period"):
+            st.session_state.period_count += 1
+            st.rerun()
+
+        # STEP 3: Query and Display Results
+        st.markdown("---")
+        st.markdown("### 📊 Step 3: Results")
+        st.markdown(f"**Product:** {selected_product.short_name} ({selected_product.unit})")
+
+        db = next(get_db())
+        try:
+            from sqlalchemy import func
+
+            # Helper function to get data for a period
+            def get_period_data(start_date, end_date):
+                result = db.query(
+                    func.sum(InvoiceItem.quantity).label('total_quantity'),
+                    func.count(InvoiceItem.id).label('order_count'),
+                    func.avg(InvoiceItem.unit_price).label('avg_price')
+                ).join(Invoice).filter(
+                    InvoiceItem.product_id == selected_product.id,
+                    Invoice.invoice_date >= start_date,
+                    Invoice.invoice_date <= end_date
+                ).first()
+
+                return {
+                    'quantity': result.total_quantity or 0,
+                    'orders': result.order_count or 0,
+                    'avg_price': result.avg_price or 0
+                }
+
+            # Get data for all periods
+            periods_data = []
+            raw_quantities = []
+
+            for idx, period in enumerate(periods):
+                period_num = idx + 1
+                data = get_period_data(period['start'], period['end'])
+                raw_quantities.append(data['quantity'])
+
+                # Calculate trend vs previous period
+                trend = "-"
+                if idx > 0 and raw_quantities[idx] > 0 and raw_quantities[idx-1] > 0:
+                    change_pct = ((raw_quantities[idx-1] - raw_quantities[idx]) / raw_quantities[idx]) * 100
+                    if change_pct > 0:
+                        trend = f"↑ +{change_pct:.1f}%"
+                    elif change_pct < 0:
+                        trend = f"↓ {change_pct:.1f}%"
+                    else:
+                        trend = "→ 0%"
+
+                periods_data.append({
+                    'Period': f"Period {period_num}\n{period['start'].strftime('%d/%m/%Y')} - {period['end'].strftime('%d/%m/%Y')}",
+                    'Quantity': f"{data['quantity']:.2f} {selected_product.unit}",
+                    'Times Ordered': data['orders'],
+                    'Avg Price': format_currency(data['avg_price']),
+                    'Trend vs Previous': trend
+                })
+
+            # Display table
+            df = pd.DataFrame(periods_data)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+        finally:
+            db.close()
+
+
+def show_price_tracking():
+    """Price Tracking - Monitor price changes over time"""
+    st.markdown('<p class="sub-header">💰 Price Tracking</p>', unsafe_allow_html=True)
+    st.info("🚧 Price Tracking coming soon - will show price trends and alerts for significant price changes")
+
+
 # ============================================================================
 # MAIN APP
 # ============================================================================
@@ -2312,8 +2559,16 @@ def main():
 
     page = st.sidebar.radio(
         "Navigation",
-        ["Dashboard", "Suppliers", "Market List", "Invoices", "Reports"]
+        ["Dashboard", "Suppliers", "Market List", "Invoices", "Payments", "Analytics"]
     )
+
+    # Analytics submenu
+    if page == "Analytics":
+        st.sidebar.markdown("---")
+        analytics_page = st.sidebar.radio(
+            "📈 Analytics",
+            ["Purchase Tracking", "Price Tracking"]
+        )
 
     st.sidebar.markdown("---")
     st.sidebar.markdown("**Quick Stats**")
@@ -2330,8 +2585,10 @@ def main():
         show_market_list()
     elif page == "Invoices":
         show_invoices()
-    elif page == "Reports":
-        show_reports()
+    elif page == "Payments":
+        show_payments()
+    elif page == "Analytics":
+        show_analytics(analytics_page)
 
 
 if __name__ == "__main__":

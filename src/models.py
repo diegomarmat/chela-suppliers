@@ -72,7 +72,7 @@ class Supplier(Base):
 
     # Relationships
     invoices = relationship("Invoice", back_populates="supplier")
-    products = relationship("Product", back_populates="preferred_supplier")
+    products = relationship("Product", back_populates="supplier")
 
     def __repr__(self):
         return f"<Supplier(id={self.id}, short_name='{self.short_name}', company_name='{self.company_name}')>"
@@ -142,12 +142,14 @@ class Product(Base):
     __tablename__ = "products"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String, nullable=False, unique=True)
+    short_name = Column(String, nullable=False)  # Human-readable name: "Cheese Block"
+    brand = Column(String)  # Optional brand: "BECA" (nullable for generic items like vegetables)
+    invoice_name = Column(String)  # For OCR matching: "BECA Cheese Block Imported France Premium" (populated later)
     category = Column(String)
     unit = Column(String, nullable=False)
     current_price = Column(Float)
     current_price_date = Column(Date)
-    preferred_supplier_id = Column(Integer, ForeignKey('suppliers.id'))
+    supplier_id = Column(Integer, ForeignKey('suppliers.id'))  # Main supplier for this product
     is_backup = Column(Boolean, nullable=False, default=False)
     unit_size = Column(Float)  # For non-exact units (pcs, bottle, etc.) - how much does 1 unit contain
     unit_size_measurement = Column(String)  # g, ml, kg, L
@@ -156,12 +158,24 @@ class Product(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
     # Relationships
-    preferred_supplier = relationship("Supplier", back_populates="products")
+    supplier = relationship("Supplier", back_populates="products")
     invoice_items = relationship("InvoiceItem", back_populates="product")
     price_history = relationship("PriceHistory", back_populates="product")
 
     def __repr__(self):
-        return f"<Product(id={self.id}, name='{self.name}', price={self.current_price})>"
+        return f"<Product(id={self.id}, short_name='{self.short_name}', brand='{self.brand}', price={self.current_price})>"
+
+    def display_name(self):
+        """Return formatted display name: 'Short Name (Brand)' or just 'Short Name'"""
+        if self.brand:
+            return f"{self.short_name} ({self.brand})"
+        return self.short_name
+
+    def invoice_dropdown_name(self):
+        """Return formatted name for invoice dropdowns: 'Short Name (Brand - unit)' or 'Short Name (unit)'"""
+        if self.brand:
+            return f"{self.short_name} ({self.brand} - {self.unit})"
+        return f"{self.short_name} ({self.unit})"
 
 
 class PriceHistory(Base):
