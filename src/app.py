@@ -1451,9 +1451,9 @@ def show_market_list():
                                 db.close()
 
 
-def show_invoices():
-    """Invoices page - View and add invoices"""
-    st.markdown('<p class="main-header">🧾 Invoices</p>', unsafe_allow_html=True)
+def show_invoices_supplies():
+    """Invoices - Supplies page - View and add invoices with line items"""
+    st.markdown('<p class="main-header">📦 Invoices - Supplies</p>', unsafe_allow_html=True)
 
     tab1, tab2, tab3 = st.tabs(["View Invoices", "Add Invoice", "Edit/Delete Invoice"])
 
@@ -2235,6 +2235,178 @@ def show_invoices():
                         db.close()
 
 
+def show_invoices_others():
+    """Invoices - Others page - Simple monthly expenses (electricity, water, pest control, etc.)"""
+    st.markdown('<p class="main-header">🏢 Invoices - Others</p>', unsafe_allow_html=True)
+    st.info("Monthly operational expenses like electricity, water, pest control, etc.")
+
+    tab1, tab2, tab3 = st.tabs(["View", "Add", "Edit/Delete"])
+
+    # TAB 1: VIEW OTHERS
+    with tab1:
+        st.markdown("### 📋 Other Operational Expenses")
+
+        db = next(get_db())
+        try:
+            # Get invoices without items (Others)
+            invoices = db.query(Invoice).filter(
+                ~Invoice.items.any()  # No invoice items = Others
+            ).order_by(Invoice.invoice_date.desc()).all()
+
+            if invoices:
+                invoice_data = []
+                for inv in invoices:
+                    invoice_data.append({
+                        'Supplier': inv.supplier.short_name if inv.supplier else '-',
+                        'Month': inv.invoice_date.strftime('%B %Y') if inv.invoice_date else '-',
+                        'Category': inv.supplier.category if inv.supplier else '-',
+                        'Amount': format_currency(inv.total_amount),
+                        'Payment Method': inv.payment_method.capitalize() if inv.payment_method else '-',
+                        'Needs Review': '⚠️' if inv.needs_review else ''
+                    })
+
+                df = pd.DataFrame(invoice_data)
+                st.dataframe(df, use_container_width=True, hide_index=True)
+            else:
+                st.info("No other operational expenses yet. Add your first expense in the 'Add' tab!")
+        finally:
+            db.close()
+
+    # TAB 2: ADD OTHERS
+    with tab2:
+        st.markdown("### ➕ Add Other Operational Expense")
+
+        with st.form("add_others_form"):
+            # SECTION 1: Supplier Selection
+            st.markdown("**📋 Supplier Selection**")
+            col1, col2 = st.columns(2)
+
+            with col1:
+                # Supplier dropdown
+                db = next(get_db())
+                suppliers = db.query(Supplier).filter(Supplier.is_active == True).order_by(Supplier.short_name).all()
+                supplier_options = {s.short_name: s for s in suppliers}  # Store supplier object, not just ID
+                db.close()
+
+                selected_supplier_name = st.selectbox(
+                    "Supplier *",
+                    options=list(supplier_options.keys()),
+                    key="others_supplier"
+                )
+
+            with col2:
+                # Full date selector (same as Supplies invoices)
+                invoice_date = st.date_input(
+                    "Invoice Date *",
+                    value=datetime.now(),
+                    format="DD/MM/YYYY",
+                    key="others_date"
+                )
+
+            # SECTION 2: Supplier Info (auto-filled, view-only)
+            if selected_supplier_name:
+                selected_supplier = supplier_options[selected_supplier_name]
+
+                st.markdown("---")
+                st.markdown("**ℹ️ Supplier Information** (auto-filled)")
+
+                col_info1, col_info2 = st.columns(2)
+                with col_info1:
+                    st.text_input(
+                        "Category",
+                        value=selected_supplier.category or "Not set",
+                        disabled=True,
+                        key="others_category_display"
+                    )
+                with col_info2:
+                    st.text_input(
+                        "Payment Terms",
+                        value=selected_supplier.payment_terms.upper() if selected_supplier.payment_terms else "Not set",
+                        disabled=True,
+                        key="others_payment_terms_display"
+                    )
+
+            # SECTION 3: Invoice Details (manual entry)
+            st.markdown("---")
+            st.markdown("**💰 Invoice Details**")
+
+            col3, col4 = st.columns(2)
+
+            with col3:
+                # Total amount
+                total_amount = st.number_input(
+                    "Total Amount (IDR) *",
+                    min_value=0.0,
+                    step=1000.0,
+                    key="others_amount"
+                )
+
+            with col4:
+                # Payment method
+                payment_method = st.selectbox(
+                    "Payment Method",
+                    ["", "cash", "transfer"],
+                    key="others_payment_method"
+                )
+
+            # Notes (full width)
+            notes = st.text_area(
+                "Notes",
+                key="others_notes",
+                help="Any additional details about this expense"
+            )
+
+            # Needs review checkbox
+            needs_review = st.checkbox(
+                "⚠️ Needs review",
+                value=False,
+                key="others_needs_review",
+                help="Check if there are details to verify later"
+            )
+
+            submitted = st.form_submit_button("💾 Save Expense", use_container_width=True)
+
+            if submitted:
+                if not selected_supplier_name:
+                    st.error("❌ Please select a supplier")
+                elif total_amount <= 0:
+                    st.error("❌ Amount must be greater than 0")
+                else:
+                    try:
+                        db = next(get_db())
+
+                        new_invoice = Invoice(
+                            supplier_id=selected_supplier.id,
+                            invoice_number=None,  # Not needed for Others
+                            invoice_date=invoice_date,
+                            due_date=None,  # Not needed for Others
+                            total_amount=total_amount,
+                            payment_status='paid' if payment_method else 'pending',
+                            payment_date=invoice_date if payment_method else None,
+                            payment_method=payment_method if payment_method else None,
+                            invoice_file_path=None,
+                            notes=notes if notes else None,
+                            needs_review=needs_review
+                        )
+
+                        db.add(new_invoice)
+                        db.commit()
+
+                        st.success(f"✅ Expense added successfully for {invoice_date.strftime('%B %d, %Y')}!")
+                        st.rerun()
+
+                    except Exception as e:
+                        db.rollback()
+                        st.error(f"❌ Error adding expense: {str(e)}")
+                    finally:
+                        db.close()
+
+    # TAB 3: EDIT/DELETE OTHERS
+    with tab3:
+        st.markdown("### ✏️ Edit/Delete Other Operational Expense")
+        st.info("🚧 Edit/Delete functionality coming soon")
+
+
 def show_payments():
     """Payments page - Payment summary for Astik"""
     st.markdown('<p class="main-header">💳 Payments</p>', unsafe_allow_html=True)
@@ -2672,6 +2844,14 @@ def main():
         ["Dashboard", "Suppliers", "Market List", "Invoices", "Payments", "Analytics"]
     )
 
+    # Invoices submenu
+    if page == "Invoices":
+        st.sidebar.markdown("---")
+        invoices_page = st.sidebar.radio(
+            "🧾 Invoices",
+            ["Supplies", "Others"]
+        )
+
     # Analytics submenu
     if page == "Analytics":
         st.sidebar.markdown("---")
@@ -2694,7 +2874,10 @@ def main():
     elif page == "Market List":
         show_market_list()
     elif page == "Invoices":
-        show_invoices()
+        if invoices_page == "Supplies":
+            show_invoices_supplies()
+        else:  # Others
+            show_invoices_others()
     elif page == "Payments":
         show_payments()
     elif page == "Analytics":
