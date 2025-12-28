@@ -662,9 +662,36 @@ def show_suppliers():
     with tab1:
         st.markdown('<p class="sub-header">Active Suppliers</p>', unsafe_allow_html=True)
 
+        # Add filters
+        st.markdown("**🔍 Filters**")
+        col_filter1, col_filter2 = st.columns(2)
+
+        with col_filter1:
+            filter_category = st.selectbox(
+                "Category",
+                ["All", "Food", "Drinks", "Operational"],
+                key="suppliers_filter_category"
+            )
+
+        with col_filter2:
+            filter_payment_terms = st.selectbox(
+                "Payment Terms",
+                ["All", "Cash", "2week", "Monthly"],
+                key="suppliers_filter_payment_terms"
+            )
+
         db = next(get_db())
         try:
-            suppliers = db.query(Supplier).filter(Supplier.is_active == True).order_by(Supplier.short_name).all()
+            # Build query with filters
+            query = db.query(Supplier).filter(Supplier.is_active == True)
+
+            if filter_category != "All":
+                query = query.filter(Supplier.category == filter_category)
+
+            if filter_payment_terms != "All":
+                query = query.filter(Supplier.payment_terms == filter_payment_terms.lower())
+
+            suppliers = query.order_by(Supplier.short_name).all()
 
             if suppliers:
                 supplier_data = []

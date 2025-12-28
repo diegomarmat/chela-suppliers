@@ -172,10 +172,22 @@ class Product(Base):
         return self.short_name
 
     def invoice_dropdown_name(self):
-        """Return formatted name for invoice dropdowns: 'Short Name (Brand - unit)' or 'Short Name (unit)'"""
+        """Return formatted name for invoice dropdowns: 'Short Name (Brand - unit - size)' or variations"""
+        parts = []
+
+        # Add brand if exists
         if self.brand:
-            return f"{self.short_name} ({self.brand} - {self.unit})"
-        return f"{self.short_name} ({self.unit})"
+            parts.append(self.brand)
+
+        # Add unit (always present)
+        parts.append(self.unit)
+
+        # Add size if exists (e.g., "1000g", "500ml")
+        if self.unit_size and self.unit_size_measurement:
+            size_display = f"{int(self.unit_size) if self.unit_size == int(self.unit_size) else self.unit_size}{self.unit_size_measurement}"
+            parts.append(size_display)
+
+        return f"{self.short_name} ({' - '.join(parts)})"
 
 
 class PriceHistory(Base):
