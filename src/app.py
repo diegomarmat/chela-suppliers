@@ -1041,8 +1041,8 @@ def show_market_list():
                     key="new_product_unit"
                 )
 
-                # Unit size fields (only for non-exact units)
-                st.markdown("**📏 Unit Size** (only for pcs/bottle/box/ctn/pack)")
+                # Unit size fields (for gram/ml/pcs/bottle/box/ctn/pack)
+                st.markdown("**📏 Unit Size** (for gram/ml/pcs/bottle/box/ctn/pack)")
                 col_size1, col_size2 = st.columns(2)
                 with col_size1:
                     unit_size = st.number_input(
@@ -1050,14 +1050,14 @@ def show_market_list():
                         min_value=0.0,
                         step=1.0,
                         key="new_product_unit_size",
-                        help="How much does 1 unit contain? E.g., 1 bottle = 1000"
+                        help="How much does 1 unit contain? E.g., 1 bottle = 1000ml, or 500 grams"
                     )
                 with col_size2:
                     unit_size_measurement = st.selectbox(
                         "Measurement",
                         ["", "g", "ml"],
                         key="new_product_unit_size_measurement",
-                        help="E.g., 1 bottle = 1000ml → select 'ml'"
+                        help="E.g., 1 bottle = 1000ml → select 'ml', or 500 grams → select 'g'"
                     )
 
             with col2:
@@ -1154,31 +1154,68 @@ def show_market_list():
     with tab3:
         st.markdown("### ✏️ Edit Product")
 
-        # Get all products
+        # Add filters
+        st.markdown("**🔍 Filters**")
+        col_filter1, col_filter2 = st.columns(2)
+
+        with col_filter1:
+            filter_category = st.selectbox(
+                "Category",
+                ["All", "Food", "Drinks", "Operational"],
+                key="edit_product_filter_category"
+            )
+
+        with col_filter2:
+            # Get all suppliers for filter
+            db_temp = next(get_db())
+            all_suppliers = db_temp.query(Supplier).filter(Supplier.is_active == True).order_by(Supplier.short_name).all()
+            supplier_names = ["All"] + [s.short_name for s in all_suppliers]
+            db_temp.close()
+
+            filter_supplier = st.selectbox(
+                "Supplier",
+                supplier_names,
+                key="edit_product_filter_supplier"
+            )
+
+        # Get filtered products
         db = next(get_db())
         from sqlalchemy.orm import joinedload
-        products = db.query(Product).options(joinedload(Product.supplier)).order_by(Product.short_name).all()
+        query = db.query(Product).options(joinedload(Product.supplier))
+
+        # Apply filters
+        if filter_category != "All":
+            query = query.filter(Product.category == filter_category)
+        if filter_supplier != "All":
+            supplier_id = next((s.id for s in all_suppliers if s.short_name == filter_supplier), None)
+            if supplier_id:
+                query = query.filter(Product.supplier_id == supplier_id)
+
+        products = query.order_by(Product.short_name).all()
 
         # Build options before closing db
         product_options = {
-            f"{p.short_name} ({p.supplier.short_name if p.supplier else 'No supplier'})": p.id
+            f"{p.short_name} ({p.brand or 'No brand'}) - {p.supplier.short_name if p.supplier else 'No supplier'}": p.id
             for p in products
         }
         db.close()
 
         if not products:
-            st.info("No products to edit. Add products first!")
+            st.info("No products found with selected filters. Try different filter options.")
         else:
+            st.info(f"💡 **Tip:** {len(products)} products match your filters. Click dropdown and start typing to search.")
 
-            st.info("💡 **Tip:** Click the dropdown and start typing to search (e.g., type 'tom' to find tomatoes)")
+            # Add placeholder option and no default selection
+            product_options_with_placeholder = ["-- Select a product to edit --"] + list(product_options.keys())
 
             selected_product_key = st.selectbox(
-                f"Select product to edit ({len(products)} total)",
-                options=list(product_options.keys()),
+                "Select product to edit",
+                options=product_options_with_placeholder,
+                index=0,  # Start with placeholder
                 key="edit_product_select"
             )
 
-            if selected_product_key:
+            if selected_product_key and selected_product_key != "-- Select a product to edit --":
                 product_id = product_options[selected_product_key]
 
                 db = next(get_db())
@@ -1186,7 +1223,8 @@ def show_market_list():
                 db.close()
 
                 if product:
-                    with st.form("edit_product_form"):
+                    # Use dynamic form key to reset form when product changes
+                    with st.form(f"edit_product_form_{product.id}"):
                         col1, col2 = st.columns(2)
 
                         with col1:
@@ -1211,8 +1249,8 @@ def show_market_list():
                                 index=["kg", "gram", "liter", "ml", "pcs", "box", "ctn", "pack", "bottle"].index(product.unit) if product.unit in ["kg", "gram", "liter", "ml", "pcs", "box", "ctn", "pack", "bottle"] else 0
                             )
 
-                            # Unit size fields (only for non-exact units)
-                            st.markdown("**📏 Unit Size** (only for pcs/bottle/box/ctn/pack)")
+                            # Unit size fields (only for gram/ml/pcs/bottle/box/ctn/pack)
+                            st.markdown("**📏 Unit Size** (for gram/ml/pcs/bottle/box/ctn/pack)")
                             col_size1, col_size2 = st.columns(2)
                             with col_size1:
                                 edit_unit_size = st.number_input(
@@ -1220,8 +1258,8 @@ def show_market_list():
                                     min_value=0.0,
                                     step=1.0,
                                     value=float(product.unit_size) if product.unit_size else 0.0,
-                                    key="edit_product_unit_size",
-                                    help="How much does 1 unit contain? E.g., 1 bottle = 1000"
+                                    key=f"edit_product_unit_size_{product.id}",
+                                    help="How much does 1 unit contain? E.g., 1 bottle = 1000ml, or 500 grams"
                                 )
                             with col_size2:
                                 current_measurement_index = 0
@@ -1234,8 +1272,8 @@ def show_market_list():
                                     "Measurement",
                                     ["", "g", "ml"],
                                     index=current_measurement_index,
-                                    key="edit_product_unit_size_measurement",
-                                    help="E.g., 1 bottle = 1000ml → select 'ml'"
+                                    key=f"edit_product_unit_size_measurement_{product.id}",
+                                    help="E.g., 1 bottle = 1000ml → select 'ml', or 500 grams → select 'g'"
                                 )
 
                         with col2:
