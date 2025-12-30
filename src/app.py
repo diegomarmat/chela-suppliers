@@ -1127,10 +1127,17 @@ def show_market_list():
                     try:
                         db = next(get_db())
 
-                        # Check if product already exists
-                        existing = db.query(Product).filter(Product.short_name == product_name).first()
+                        # Check if product already exists (combination of short_name + brand + supplier)
+                        supplier_id = supplier_options[selected_supplier]
+                        existing = db.query(Product).filter(
+                            Product.short_name == product_name,
+                            Product.brand == (brand if brand else None),
+                            Product.supplier_id == supplier_id
+                        ).first()
+
                         if existing:
-                            st.error(f"❌ Product '{product_name}' already exists!")
+                            brand_display = f" (Brand: {brand})" if brand else ""
+                            st.error(f"❌ Product '{product_name}'{brand_display} from supplier '{selected_supplier}' already exists!")
                         else:
                             # Set unit size based on unit type
                             save_unit_size = None
@@ -1352,20 +1359,34 @@ def show_market_list():
                                     # Fetch the product in this session
                                     product_to_update = db.query(Product).filter(Product.id == product.id).first()
 
-                                    # Check if new name conflicts with existing product
-                                    if edit_name != product_to_update.short_name:
-                                        existing = db.query(Product).filter(Product.short_name == edit_name).first()
+                                    # Check if new combination conflicts with existing product (but not itself)
+                                    new_supplier_id = supplier_options[edit_supplier]
+                                    new_brand = edit_brand if edit_brand else None
+
+                                    # Only check if something changed
+                                    if (edit_name != product_to_update.short_name or
+                                        new_brand != product_to_update.brand or
+                                        new_supplier_id != product_to_update.supplier_id):
+
+                                        existing = db.query(Product).filter(
+                                            Product.short_name == edit_name,
+                                            Product.brand == new_brand,
+                                            Product.supplier_id == new_supplier_id,
+                                            Product.id != product.id  # Exclude the current product
+                                        ).first()
+
                                         if existing:
-                                            st.error(f"❌ Product '{edit_name}' already exists!")
+                                            brand_display = f" (Brand: {new_brand})" if new_brand else ""
+                                            st.error(f"❌ Product '{edit_name}'{brand_display} from supplier '{edit_supplier}' already exists!")
                                             db.close()
                                             return
 
                                     # Update the product
                                     product_to_update.short_name = edit_name
-                                    product_to_update.brand = edit_brand if edit_brand else None
+                                    product_to_update.brand = new_brand
                                     product_to_update.category = edit_category
                                     product_to_update.unit = edit_unit
-                                    product_to_update.supplier_id = supplier_options[edit_supplier]
+                                    product_to_update.supplier_id = new_supplier_id
                                     product_to_update.is_backup = edit_is_backup
                                     # current_price and current_price_date are NOT updated here - only from invoices
                                     product_to_update.notes = edit_notes if edit_notes else None
@@ -2104,12 +2125,13 @@ def show_invoices_supplies():
                         format="DD/MM/YYYY"
                     )
 
-                    # Amount with dots
-                    current_amount_formatted = f"{int(invoice_to_edit.total_amount):,}".replace(',', '.')
-                    amount_str = st.text_input(
-                        "Total Amount (IDR) *",
-                        value=current_amount_formatted,
-                        help="Edit amount with dots as separators"
+                    # Auto-calculate total from line items
+                    calculated_total = sum(item['total'] for item in st.session_state.edit_line_items)
+                    st.text_input(
+                        "Total Amount (auto-calculated)",
+                        value=format_currency(calculated_total),
+                        disabled=True,
+                        help="Total is automatically calculated from line items"
                     )
 
                 with col2:
@@ -2132,14 +2154,6 @@ def show_invoices_supplies():
                     st.text_input("Payment Terms", value=payment_info, disabled=True)
                     st.text_input("Due Date (auto-calculated)", value=format_date_input(calculated_due_date), disabled=True)
 
-                    # Parse amount
-                    try:
-                        total_amount = int(amount_str.replace('.', '').replace(',', ''))
-                        st.success(f"Amount: {format_currency(total_amount)}")
-                    except:
-                        total_amount = 0
-                        st.error("Invalid amount format")
-
                 notes = st.text_area("Notes", value=invoice_to_edit.notes or "")
 
                 needs_review = st.checkbox(
@@ -2155,8 +2169,11 @@ def show_invoices_supplies():
                     delete_btn = st.form_submit_button("Delete Invoice", use_container_width=True, type="secondary")
 
                 if update_btn:
+                    # Calculate total from line items
+                    total_amount = sum(item['total'] for item in st.session_state.edit_line_items)
+
                     if total_amount <= 0:
-                        st.error("Amount must be greater than 0!")
+                        st.error("Amount must be greater than 0! Add line items to the invoice.")
                     else:
                         db = next(get_db())
                         try:
@@ -2169,12 +2186,14 @@ def show_invoices_supplies():
                             invoice.invoice_number = invoice_number or None
                             invoice.invoice_date = invoice_date
                             invoice.due_date = calculated_due_date
-                            invoice.total_amount = total_amount
+                            invoice.total_amount = total_amount  # Now auto-calculated from line items
                             invoice.notes = notes or None
                             invoice.needs_review = needs_review
 
-                            # Update line items - delete old ones and insert new ones
-                            # Delete existing items
+                            # Delete old PriceHistory records for this invoice (before deleting invoice items)
+                            db.query(PriceHistory).filter(PriceHistory.invoice_id == invoice.id).delete()
+
+                            # Delete existing invoice items
                             db.query(InvoiceItem).filter(InvoiceItem.invoice_id == invoice.id).delete()
 
                             # Add new line items if any
@@ -2204,6 +2223,27 @@ def show_invoices_supplies():
                                         total_price=item['total']
                                     )
                                     db.add(invoice_item)
+
+                                    # Calculate actual price paid (including PPN if applicable)
+                                    actual_price = item['unit_price']
+                                    if supplier.ppn_handling == "added":
+                                        # For "PPN Added" suppliers, include 11% tax in the tracked price
+                                        actual_price = item['unit_price'] * 1.11
+
+                                    # Update product current price if this is newer
+                                    if product and (not product.current_price_date or invoice_date >= product.current_price_date):
+                                        product.current_price = actual_price
+                                        product.current_price_date = invoice_date
+
+                                    # Create price history record (for price tracking analytics)
+                                    price_history_record = PriceHistory(
+                                        product_id=product.id,
+                                        supplier_id=supplier.id,
+                                        invoice_id=invoice.id,
+                                        price=actual_price,
+                                        date=invoice_date
+                                    )
+                                    db.add(price_history_record)
 
                             db.commit()
 
@@ -2448,23 +2488,24 @@ def show_payments():
 
         db = next(get_db())
         try:
-            # Get invoices from selected month, filtered by supplier payment terms
+            # Get invoices with due dates in selected month
             from sqlalchemy import extract
             from sqlalchemy.orm import joinedload
 
+            # Get all invoices with due dates in the selected month (regardless of invoice date)
             query = db.query(Invoice).options(joinedload(Invoice.supplier)).filter(
-                extract('year', Invoice.invoice_date) == selected_year,
-                extract('month', Invoice.invoice_date) == selected_month
+                extract('year', Invoice.due_date) == selected_year,
+                extract('month', Invoice.due_date) == selected_month
             )
 
-            # Filter by supplier payment terms (payment cycle)
+            # Filter by due date within the month (payment cycle)
             if payment_cycle == "15th (Mid-month)":
-                # Only suppliers with 2-week payment terms
-                query = query.join(Supplier).filter(Supplier.payment_terms == '2week')
+                # Only invoices due on the 15th
+                query = query.filter(extract('day', Invoice.due_date) == 15)
             elif payment_cycle == "End of Month":
-                # Only suppliers with monthly payment terms
-                query = query.join(Supplier).filter(Supplier.payment_terms == 'monthly')
-            # If "All", don't filter by payment terms
+                # Only invoices due after the 15th (end of month payments)
+                query = query.filter(extract('day', Invoice.due_date) > 15)
+            # If "All", include all due dates in the month
 
             invoices = query.all()
 
@@ -2509,7 +2550,9 @@ def show_payments():
                     })
 
                 df = pd.DataFrame(report_data)
-                st.dataframe(df, use_container_width=True, hide_index=True)
+                # Hide Total_Raw column (used only for internal calculations)
+                display_df = df.drop('Total_Raw', axis=1)
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
 
                 # Summary
                 total_amount = sum(data['total'] for data in supplier_data.values())
@@ -2612,7 +2655,7 @@ def show_analytics(analytics_page):
 def show_purchase_tracking():
     """Purchase Tracking - Monitor quantities ordered over time"""
     st.markdown('<p class="sub-header">📦 Purchase Tracking</p>', unsafe_allow_html=True)
-    st.caption("Deep dive into specific products - track quantities, orders, and prices across time periods")
+    st.caption("Track quantity changes for products over time - identify trends and significant order changes")
 
     # Initialize persistent session state for filters
     if 'pt_filter_category' not in st.session_state:
@@ -2625,209 +2668,1032 @@ def show_purchase_tracking():
         st.session_state.period_count = 1
     if 'pt_period_dates' not in st.session_state:
         st.session_state.pt_period_dates = {}
+    # Quantity Alerts session state
+    if 'qty_alert_results' not in st.session_state:
+        st.session_state.qty_alert_results = None
+    if 'qty_alert_period1_start' not in st.session_state:
+        st.session_state.qty_alert_period1_start = date.today() - timedelta(days=60)
+    if 'qty_alert_period1_end' not in st.session_state:
+        st.session_state.qty_alert_period1_end = date.today() - timedelta(days=30)
+    if 'qty_alert_period2_start' not in st.session_state:
+        st.session_state.qty_alert_period2_start = date.today() - timedelta(days=30)
+    if 'qty_alert_period2_end' not in st.session_state:
+        st.session_state.qty_alert_period2_end = date.today()
+    if 'qty_alert_threshold' not in st.session_state:
+        st.session_state.qty_alert_threshold = 20.0
+    if 'qty_alert_category' not in st.session_state:
+        st.session_state.qty_alert_category = "All"
 
-    # STEP 1: Product Selection
-    st.markdown("### 🔍 Step 1: Select Product")
+    # Two main sections: Quantity Alerts (dashboard) and Product Detail
+    tab1, tab2 = st.tabs(["⚠️ Quantity Alerts", "📊 Product Detail"])
 
-    col1, col2, col3 = st.columns(3)
+    # ============================================================================
+    # TAB 1: QUANTITY ALERTS (DASHBOARD)
+    # ============================================================================
+    with tab1:
+        st.markdown("### ⚠️ Quantity Change Alerts")
+        st.caption("Identify products with significant quantity changes between two periods")
 
-    with col1:
-        # Category filter
-        categories = ["All", "Food", "Drinks", "Operational"]
-        category_index = categories.index(st.session_state.pt_filter_category) if st.session_state.pt_filter_category in categories else 0
-        filter_category = st.selectbox("Category", categories, index=category_index, key="pt_category")
-        if filter_category != st.session_state.pt_filter_category:
-            st.session_state.pt_filter_category = filter_category
-            st.session_state.pt_selected_product = None  # Reset product when category changes
+        # Period selection
+        st.markdown("#### 📅 Compare Two Periods")
+        col1, col2 = st.columns(2)
 
-    with col2:
-        # Supplier filter - filtered by category
-        db_temp = next(get_db())
-
-        # Get suppliers that have products in the selected category
-        supplier_query = db_temp.query(Supplier).join(
-            Product, Product.supplier_id == Supplier.id
-        ).filter(Supplier.is_active == True)
-
-        if filter_category != "All":
-            supplier_query = supplier_query.filter(Product.category == filter_category)
-
-        suppliers = supplier_query.distinct().order_by(Supplier.short_name).all()
-        supplier_names = ["All"] + [s.short_name for s in suppliers]
-        db_temp.close()
-
-        # Reset supplier if it's not in the filtered list
-        if st.session_state.pt_filter_supplier not in supplier_names:
-            st.session_state.pt_filter_supplier = "All"
-
-        supplier_index = supplier_names.index(st.session_state.pt_filter_supplier) if st.session_state.pt_filter_supplier in supplier_names else 0
-        filter_supplier = st.selectbox("Supplier", supplier_names, index=supplier_index, key="pt_supplier")
-        if filter_supplier != st.session_state.pt_filter_supplier:
-            st.session_state.pt_filter_supplier = filter_supplier
-            st.session_state.pt_selected_product = None  # Reset product when supplier changes
-
-    with col3:
-        # Get products based on filters
-        db_temp = next(get_db())
-        query = db_temp.query(Product).join(Supplier, Product.supplier_id == Supplier.id)
-
-        if filter_category != "All":
-            query = query.filter(Product.category == filter_category)
-        if filter_supplier != "All":
-            query = query.filter(Supplier.short_name == filter_supplier)
-
-        products = query.order_by(Product.short_name).all()
-        db_temp.close()
-
-        if products:
-            product_names = [p.short_name for p in products]
-            # Find index of previously selected product
-            product_index = 0
-            if st.session_state.pt_selected_product and st.session_state.pt_selected_product in product_names:
-                product_index = product_names.index(st.session_state.pt_selected_product)
-
-            selected_product_name = st.selectbox("Product", product_names, index=product_index, key="pt_product")
-            st.session_state.pt_selected_product = selected_product_name
-            selected_product = next(p for p in products if p.short_name == selected_product_name)
-        else:
-            st.warning("No products match your filters")
-            selected_product = None
-
-    if selected_product:
-        # STEP 2: Define Comparison Periods
-        st.markdown("---")
-        st.markdown("### 📅 Step 2: Define Time Periods")
-
-        from datetime import timedelta
-
-        # Collect period dates
-        periods = []
-
-        for i in range(st.session_state.period_count):
-            period_num = i + 1
-            st.markdown(f"**Period {period_num}**")
-
-            col1, col2, col3 = st.columns([2, 2, 1])
-            with col1:
-                # Get saved date or use default
-                saved_start_key = f"period_{period_num}_start_saved"
-                if saved_start_key in st.session_state.pt_period_dates:
-                    default_start = st.session_state.pt_period_dates[saved_start_key]
-                else:
-                    default_start = date.today() - timedelta(days=30 * (period_num))
-
-                start = st.date_input(
+        with col1:
+            st.markdown("**Period 1 (Earlier)**")
+            p1_col1, p1_col2 = st.columns(2)
+            with p1_col1:
+                period1_start = st.date_input(
                     "Start Date",
-                    default_start,
-                    key=f"period_{period_num}_start"
+                    value=st.session_state.qty_alert_period1_start,
+                    key="qty_p1_start"
                 )
-                st.session_state.pt_period_dates[saved_start_key] = start
-
-            with col2:
-                # Get saved date or use default
-                saved_end_key = f"period_{period_num}_end_saved"
-                if saved_end_key in st.session_state.pt_period_dates:
-                    default_end = st.session_state.pt_period_dates[saved_end_key]
-                else:
-                    default_end = date.today() - timedelta(days=30 * (period_num - 1))
-                    if period_num == 1:
-                        default_end = date.today()
-
-                end = st.date_input(
+                st.session_state.qty_alert_period1_start = period1_start
+            with p1_col2:
+                period1_end = st.date_input(
                     "End Date",
-                    default_end,
-                    key=f"period_{period_num}_end"
+                    value=st.session_state.qty_alert_period1_end,
+                    key="qty_p1_end"
                 )
-                st.session_state.pt_period_dates[saved_end_key] = end
+                st.session_state.qty_alert_period1_end = period1_end
 
-            with col3:
-                # Remove button (only for periods > 1)
-                if period_num > 1:
-                    if st.button("🗑️ Remove", key=f"remove_{period_num}"):
-                        # Clean up saved dates for removed period
-                        removed_start_key = f"period_{period_num}_start_saved"
-                        removed_end_key = f"period_{period_num}_end_saved"
-                        if removed_start_key in st.session_state.pt_period_dates:
-                            del st.session_state.pt_period_dates[removed_start_key]
-                        if removed_end_key in st.session_state.pt_period_dates:
-                            del st.session_state.pt_period_dates[removed_end_key]
-                        st.session_state.period_count -= 1
-                        st.rerun()
+        with col2:
+            st.markdown("**Period 2 (Recent)**")
+            p2_col1, p2_col2 = st.columns(2)
+            with p2_col1:
+                period2_start = st.date_input(
+                    "Start Date",
+                    value=st.session_state.qty_alert_period2_start,
+                    key="qty_p2_start"
+                )
+                st.session_state.qty_alert_period2_start = period2_start
+            with p2_col2:
+                period2_end = st.date_input(
+                    "End Date",
+                    value=st.session_state.qty_alert_period2_end,
+                    key="qty_p2_end"
+                )
+                st.session_state.qty_alert_period2_end = period2_end
 
-            periods.append({'start': start, 'end': end})
+        # Filters
+        col1, col2 = st.columns(2)
+        with col1:
+            qty_alert_cat = st.selectbox(
+                "Filter by Category",
+                ["All", "Food", "Drinks", "Operational"],
+                index=["All", "Food", "Drinks", "Operational"].index(st.session_state.qty_alert_category),
+                key="qty_alert_cat"
+            )
+            st.session_state.qty_alert_category = qty_alert_cat
+        with col2:
+            qty_threshold = st.number_input(
+                "Quantity Change Threshold (%)",
+                min_value=0.0,
+                max_value=200.0,
+                value=st.session_state.qty_alert_threshold,
+                step=10.0,
+                key="qty_threshold_input",
+                help="Show products where quantity ordered changed by at least this percentage"
+            )
+            st.session_state.qty_alert_threshold = qty_threshold
 
-        # Add period button
-        if st.button("➕ Add Another Period"):
-            st.session_state.period_count += 1
-            st.rerun()
+        if st.button("🔍 Find Quantity Changes", type="primary"):
+            db = next(get_db())
+            try:
+                # Query all products with invoice items in both periods
+                query = db.query(Product).join(
+                    InvoiceItem, Product.id == InvoiceItem.product_id
+                ).join(
+                    Invoice, InvoiceItem.invoice_id == Invoice.id
+                ).filter(
+                    Invoice.invoice_date >= period1_start
+                )
 
-        # STEP 3: Query and Display Results
-        st.markdown("---")
-        st.markdown("### 📊 Step 3: Results")
-        st.markdown(f"**Product:** {selected_product.short_name} ({selected_product.unit})")
+                if qty_alert_cat != "All":
+                    query = query.filter(Product.category == qty_alert_cat)
 
-        db = next(get_db())
-        try:
-            from sqlalchemy import func
+                products_with_history = query.distinct().all()
 
-            # Helper function to get data for a period
-            def get_period_data(start_date, end_date):
-                result = db.query(
-                    func.sum(InvoiceItem.quantity).label('total_quantity'),
-                    func.count(InvoiceItem.id).label('order_count'),
-                    func.avg(InvoiceItem.unit_price).label('avg_price')
-                ).join(Invoice).filter(
-                    InvoiceItem.product_id == selected_product.id,
-                    Invoice.invoice_date >= start_date,
-                    Invoice.invoice_date <= end_date
-                ).first()
+                # Analyze each product
+                alerts = []
+                for product in products_with_history:
+                    # Get quantity for period 1
+                    qty_p1 = db.query(func.sum(InvoiceItem.quantity)).join(Invoice).filter(
+                        InvoiceItem.product_id == product.id,
+                        Invoice.invoice_date >= period1_start,
+                        Invoice.invoice_date <= period1_end
+                    ).scalar() or 0
 
-                return {
-                    'quantity': result.total_quantity or 0,
-                    'orders': result.order_count or 0,
-                    'avg_price': result.avg_price or 0
-                }
+                    # Get quantity for period 2
+                    qty_p2 = db.query(func.sum(InvoiceItem.quantity)).join(Invoice).filter(
+                        InvoiceItem.product_id == product.id,
+                        Invoice.invoice_date >= period2_start,
+                        Invoice.invoice_date <= period2_end
+                    ).scalar() or 0
 
-            # Get data for all periods
-            periods_data = []
-            raw_quantities = []
+                    # Calculate change (only if both periods have data)
+                    if qty_p1 > 0 and qty_p2 > 0:
+                        qty_change = qty_p2 - qty_p1
+                        qty_change_pct = (qty_change / qty_p1) * 100
 
-            for idx, period in enumerate(periods):
-                period_num = idx + 1
-                data = get_period_data(period['start'], period['end'])
-                raw_quantities.append(data['quantity'])
+                        if abs(qty_change_pct) >= qty_threshold:
+                            # Get supplier info
+                            supplier = db.query(Supplier).filter(
+                                Supplier.id == product.supplier_id
+                            ).first()
 
-                # Calculate trend vs previous period
-                trend = "-"
-                if idx > 0 and raw_quantities[idx] > 0 and raw_quantities[idx-1] > 0:
-                    change_pct = ((raw_quantities[idx-1] - raw_quantities[idx]) / raw_quantities[idx]) * 100
-                    if change_pct > 0:
-                        trend = f"↑ +{change_pct:.1f}%"
-                    elif change_pct < 0:
-                        trend = f"↓ {change_pct:.1f}%"
+                            alerts.append({
+                                'Product': product.short_name,
+                                'Brand': product.brand or '-',
+                                'Category': product.category or '-',
+                                'Unit': product.unit,
+                                'Supplier': supplier.short_name if supplier else '-',
+                                'Period 1 Qty': qty_p1,
+                                'Period 2 Qty': qty_p2,
+                                'Change': qty_change,
+                                'Change %': qty_change_pct
+                            })
+
+                # Store results in session state
+                st.session_state.qty_alert_results = alerts
+
+            finally:
+                db.close()
+
+        # Display results if they exist
+        if st.session_state.qty_alert_results is not None:
+            alerts = st.session_state.qty_alert_results
+            threshold_display = st.session_state.qty_alert_threshold
+
+            if alerts:
+                st.success(f"Found {len(alerts)} product(s) with quantity changes ≥ {threshold_display}%")
+
+                # Sort by absolute change percentage (highest first)
+                alerts_df = pd.DataFrame(alerts)
+                alerts_df['Abs Change %'] = alerts_df['Change %'].abs()
+                alerts_df = alerts_df.sort_values('Abs Change %', ascending=False)
+
+                # Format for display
+                display_df = alerts_df.copy()
+                display_df['Period 1 Qty'] = display_df['Period 1 Qty'].apply(lambda x: f"{x:,.1f}")
+                display_df['Period 2 Qty'] = display_df['Period 2 Qty'].apply(lambda x: f"{x:,.1f}")
+                display_df['Change'] = display_df['Change'].apply(lambda x: f"{x:+,.1f}")
+                display_df['Change %'] = display_df['Change %'].apply(lambda x: f"{x:+.1f}%")
+                display_df = display_df.drop('Abs Change %', axis=1)
+
+                st.dataframe(
+                    display_df,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                # Summary statistics
+                st.markdown("#### 📊 Summary")
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    increases = alerts_df[alerts_df['Change %'] > 0]
+                    st.metric("Products Increasing", len(increases))
+                with col2:
+                    decreases = alerts_df[alerts_df['Change %'] < 0]
+                    st.metric("Products Decreasing", len(decreases))
+                with col3:
+                    if len(increases) > 0:
+                        avg_increase = increases['Change %'].mean()
+                        st.metric("Avg Increase", f"{avg_increase:.1f}%")
                     else:
-                        trend = "→ 0%"
+                        st.metric("Avg Increase", "N/A")
+                with col4:
+                    if len(decreases) > 0:
+                        avg_decrease = decreases['Change %'].mean()
+                        st.metric("Avg Decrease", f"{avg_decrease:.1f}%")
+                    else:
+                        st.metric("Avg Decrease", "N/A")
 
-                periods_data.append({
-                    'Period': f"Period {period_num}\n{period['start'].strftime('%d/%m/%Y')} - {period['end'].strftime('%d/%m/%Y')}",
-                    'Quantity': f"{data['quantity']:.2f} {selected_product.unit}",
-                    'Times Ordered': data['orders'],
-                    'Avg Price': format_currency(data['avg_price']),
-                    'Trend vs Previous': trend
-                })
+            else:
+                st.info(f"No products found with quantity changes ≥ {threshold_display}% between the two periods")
 
-            # Display table
-            df = pd.DataFrame(periods_data)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+    # ============================================================================
+    # TAB 2: PRODUCT DETAIL
+    # ============================================================================
+    with tab2:
+        # STEP 1: Product Selection
+        st.markdown("### 🔍 Step 1: Select Product")
 
-        finally:
-            db.close()
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            # Category filter
+            categories = ["All", "Food", "Drinks", "Operational"]
+            category_index = categories.index(st.session_state.pt_filter_category) if st.session_state.pt_filter_category in categories else 0
+            filter_category = st.selectbox("Category", categories, index=category_index, key="pt_category")
+            if filter_category != st.session_state.pt_filter_category:
+                st.session_state.pt_filter_category = filter_category
+                st.session_state.pt_selected_product = None  # Reset product when category changes
+
+        with col2:
+            # Supplier filter - filtered by category
+            db_temp = next(get_db())
+
+            # Get suppliers that have products in the selected category
+            supplier_query = db_temp.query(Supplier).join(
+                Product, Product.supplier_id == Supplier.id
+            ).filter(Supplier.is_active == True)
+
+            if filter_category != "All":
+                supplier_query = supplier_query.filter(Product.category == filter_category)
+
+            suppliers = supplier_query.distinct().order_by(Supplier.short_name).all()
+            supplier_names = ["All"] + [s.short_name for s in suppliers]
+            db_temp.close()
+
+            # Reset supplier if it's not in the filtered list
+            if st.session_state.pt_filter_supplier not in supplier_names:
+                st.session_state.pt_filter_supplier = "All"
+
+            supplier_index = supplier_names.index(st.session_state.pt_filter_supplier) if st.session_state.pt_filter_supplier in supplier_names else 0
+            filter_supplier = st.selectbox("Supplier", supplier_names, index=supplier_index, key="pt_supplier")
+            if filter_supplier != st.session_state.pt_filter_supplier:
+                st.session_state.pt_filter_supplier = filter_supplier
+                st.session_state.pt_selected_product = None  # Reset product when supplier changes
+
+        with col3:
+            # Get products based on filters
+            db_temp = next(get_db())
+            query = db_temp.query(Product).join(Supplier, Product.supplier_id == Supplier.id)
+
+            if filter_category != "All":
+                query = query.filter(Product.category == filter_category)
+            if filter_supplier != "All":
+                query = query.filter(Supplier.short_name == filter_supplier)
+
+            products = query.order_by(Product.short_name).all()
+            db_temp.close()
+
+            if products:
+                product_names = [p.short_name for p in products]
+                # Find index of previously selected product
+                product_index = 0
+                if st.session_state.pt_selected_product and st.session_state.pt_selected_product in product_names:
+                    product_index = product_names.index(st.session_state.pt_selected_product)
+
+                selected_product_name = st.selectbox("Product", product_names, index=product_index, key="pt_product")
+                st.session_state.pt_selected_product = selected_product_name
+                selected_product = next(p for p in products if p.short_name == selected_product_name)
+            else:
+                st.warning("No products match your filters")
+                selected_product = None
+
+        if selected_product:
+            # STEP 2: Define Comparison Periods
+            st.markdown("---")
+            st.markdown("### 📅 Step 2: Define Time Periods")
+
+            # Collect period dates
+            periods = []
+    
+            for i in range(st.session_state.period_count):
+                period_num = i + 1
+                st.markdown(f"**Period {period_num}**")
+    
+                col1, col2, col3 = st.columns([2, 2, 1])
+                with col1:
+                    # Get saved date or use default
+                    saved_start_key = f"period_{period_num}_start_saved"
+                    if saved_start_key in st.session_state.pt_period_dates:
+                        default_start = st.session_state.pt_period_dates[saved_start_key]
+                    else:
+                        default_start = date.today() - timedelta(days=30 * (period_num))
+    
+                    start = st.date_input(
+                        "Start Date",
+                        default_start,
+                        key=f"period_{period_num}_start"
+                    )
+                    st.session_state.pt_period_dates[saved_start_key] = start
+    
+                with col2:
+                    # Get saved date or use default
+                    saved_end_key = f"period_{period_num}_end_saved"
+                    if saved_end_key in st.session_state.pt_period_dates:
+                        default_end = st.session_state.pt_period_dates[saved_end_key]
+                    else:
+                        default_end = date.today() - timedelta(days=30 * (period_num - 1))
+                        if period_num == 1:
+                            default_end = date.today()
+    
+                    end = st.date_input(
+                        "End Date",
+                        default_end,
+                        key=f"period_{period_num}_end"
+                    )
+                    st.session_state.pt_period_dates[saved_end_key] = end
+    
+                with col3:
+                    # Remove button (only for periods > 1)
+                    if period_num > 1:
+                        if st.button("🗑️ Remove", key=f"remove_{period_num}"):
+                            # Clean up saved dates for removed period
+                            removed_start_key = f"period_{period_num}_start_saved"
+                            removed_end_key = f"period_{period_num}_end_saved"
+                            if removed_start_key in st.session_state.pt_period_dates:
+                                del st.session_state.pt_period_dates[removed_start_key]
+                            if removed_end_key in st.session_state.pt_period_dates:
+                                del st.session_state.pt_period_dates[removed_end_key]
+                            st.session_state.period_count -= 1
+                            st.rerun()
+    
+                periods.append({'start': start, 'end': end})
+    
+            # Add period button
+            if st.button("➕ Add Another Period"):
+                st.session_state.period_count += 1
+                st.rerun()
+    
+            # STEP 3: Query and Display Results
+            st.markdown("---")
+            st.markdown("### 📊 Step 3: Results")
+            st.markdown(f"**Product:** {selected_product.short_name} ({selected_product.unit})")
+    
+            db = next(get_db())
+            try:
+                from sqlalchemy import func
+    
+                # Helper function to get data for a period
+                def get_period_data(start_date, end_date):
+                    result = db.query(
+                        func.sum(InvoiceItem.quantity).label('total_quantity'),
+                        func.count(InvoiceItem.id).label('order_count'),
+                        func.avg(InvoiceItem.unit_price).label('avg_price')
+                    ).join(Invoice).filter(
+                        InvoiceItem.product_id == selected_product.id,
+                        Invoice.invoice_date >= start_date,
+                        Invoice.invoice_date <= end_date
+                    ).first()
+    
+                    return {
+                        'quantity': result.total_quantity or 0,
+                        'orders': result.order_count or 0,
+                        'avg_price': result.avg_price or 0
+                    }
+    
+                # Get data for all periods
+                periods_data = []
+                raw_quantities = []
+    
+                for idx, period in enumerate(periods):
+                    period_num = idx + 1
+                    data = get_period_data(period['start'], period['end'])
+                    raw_quantities.append(data['quantity'])
+    
+                    # Calculate trend vs previous period (Current vs Previous)
+                    trend = "-"
+                    if idx > 0 and raw_quantities[idx] > 0 and raw_quantities[idx-1] > 0:
+                        # Correct formula: (Current - Previous) / Previous * 100
+                        change_pct = ((raw_quantities[idx] - raw_quantities[idx-1]) / raw_quantities[idx-1]) * 100
+                        if change_pct > 0:
+                            trend = f"↑ +{change_pct:.1f}%"
+                        elif change_pct < 0:
+                            trend = f"↓ {change_pct:.1f}%"
+                        else:
+                            trend = "→ 0%"
+    
+                    periods_data.append({
+                        'Period': f"Period {period_num}\n{period['start'].strftime('%d/%m/%Y')} - {period['end'].strftime('%d/%m/%Y')}",
+                        'Quantity': f"{data['quantity']:.2f} {selected_product.unit}",
+                        'Times Ordered': data['orders'],
+                        'Avg Price': format_currency(data['avg_price']),
+                        'Trend vs Previous': trend
+                    })
+    
+                # Display table
+                df = pd.DataFrame(periods_data)
+                st.dataframe(df, use_container_width=True, hide_index=True)
+    
+            finally:
+                db.close()
 
 
 def show_price_tracking():
     """Price Tracking - Monitor price changes over time"""
     st.markdown('<p class="sub-header">💰 Price Tracking</p>', unsafe_allow_html=True)
-    st.info("🚧 Price Tracking coming soon - will show price trends and alerts for significant price changes")
+    st.caption("Track price changes for products over time - identify trends and significant price increases")
+
+    # Initialize persistent session state for Price Tracking
+    if 'price_filter_category' not in st.session_state:
+        st.session_state.price_filter_category = "All"
+    if 'price_filter_supplier' not in st.session_state:
+        st.session_state.price_filter_supplier = "All"
+    if 'price_selected_product' not in st.session_state:
+        st.session_state.price_selected_product = None
+    if 'price_start_date' not in st.session_state:
+        st.session_state.price_start_date = date.today() - timedelta(days=90)
+    if 'price_end_date' not in st.session_state:
+        st.session_state.price_end_date = date.today()
+    if 'alert_results' not in st.session_state:
+        st.session_state.alert_results = None
+    if 'alert_start_date' not in st.session_state:
+        st.session_state.alert_start_date = date.today() - timedelta(days=90)
+    if 'alert_end_date' not in st.session_state:
+        st.session_state.alert_end_date = date.today()
+    if 'alert_threshold' not in st.session_state:
+        st.session_state.alert_threshold = 10.0
+    if 'alert_category' not in st.session_state:
+        st.session_state.alert_category = "All"
+
+    # Two main sections: Price Alerts (dashboard) and Individual Product View
+    tab1, tab2 = st.tabs(["⚠️ Price Alerts", "📈 Product Price History"])
+
+    # ============================================================================
+    # TAB 1: PRICE ALERTS (DASHBOARD)
+    # ============================================================================
+    with tab1:
+        st.markdown("### 📊 Price Health Dashboard")
+        st.caption("Monitor overall price trends and identify significant price changes")
+
+        # ========================================================================
+        # AUTOMATIC HEALTH OVERVIEW
+        # ========================================================================
+        st.markdown("#### 📈 Overview")
+
+        # Quick time period selection
+        st.markdown("**Time Period:**")
+        period_col1, period_col2, period_col3, period_col4, period_col5 = st.columns(5)
+
+        with period_col1:
+            if st.button("1 Month", use_container_width=True, key="alert_1m"):
+                st.session_state.alert_start_date = date.today() - timedelta(days=30)
+                st.session_state.alert_end_date = date.today()
+                st.rerun()
+
+        with period_col2:
+            if st.button("3 Months", use_container_width=True, key="alert_3m"):
+                st.session_state.alert_start_date = date.today() - timedelta(days=90)
+                st.session_state.alert_end_date = date.today()
+                st.rerun()
+
+        with period_col3:
+            if st.button("6 Months", use_container_width=True, key="alert_6m"):
+                st.session_state.alert_start_date = date.today() - timedelta(days=180)
+                st.session_state.alert_end_date = date.today()
+                st.rerun()
+
+        with period_col4:
+            if st.button("1 Year", use_container_width=True, key="alert_1y"):
+                st.session_state.alert_start_date = date.today() - timedelta(days=365)
+                st.session_state.alert_end_date = date.today()
+                st.rerun()
+
+        with period_col5:
+            if st.button("Reset", use_container_width=True, key="alert_reset"):
+                st.session_state.alert_start_date = date.today() - timedelta(days=90)
+                st.session_state.alert_end_date = date.today()
+                st.rerun()
+
+        # Date range display and threshold
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.text_input(
+                "From Date",
+                value=st.session_state.alert_start_date.strftime('%d-%b-%Y'),
+                disabled=True
+            )
+        with col2:
+            st.text_input(
+                "To Date",
+                value=st.session_state.alert_end_date.strftime('%d-%b-%Y'),
+                disabled=True
+            )
+        with col3:
+            threshold = st.slider(
+                "Change Threshold (%)",
+                min_value=5.0,
+                max_value=50.0,
+                value=st.session_state.alert_threshold,
+                step=5.0,
+                key="alert_threshold_slider"
+            )
+            st.session_state.alert_threshold = threshold
+
+        # Auto-calculate price health
+        db = next(get_db())
+        try:
+            # Get all products with price history in the period
+            alert_start = st.session_state.alert_start_date
+            alert_end = st.session_state.alert_end_date
+
+            products_with_history = db.query(Product).join(
+                PriceHistory, Product.id == PriceHistory.product_id
+            ).filter(
+                PriceHistory.date >= alert_start,
+                PriceHistory.date <= alert_end
+            ).distinct().all()
+
+            if products_with_history:
+                # Analyze each product
+                all_changes = []
+                category_changes = {'Food': [], 'Drinks': [], 'Operational': []}
+
+                for product in products_with_history:
+                    # Get first and last price in period
+                    prices = db.query(PriceHistory).filter(
+                        PriceHistory.product_id == product.id,
+                        PriceHistory.date >= alert_start,
+                        PriceHistory.date <= alert_end
+                    ).order_by(PriceHistory.date.asc()).all()
+
+                    if len(prices) >= 2:
+                        first_price = prices[0].price
+                        last_price = prices[-1].price
+                        price_change_pct = ((last_price - first_price) / first_price) * 100
+
+                        all_changes.append(price_change_pct)
+
+                        # Track by category
+                        if product.category in category_changes:
+                            category_changes[product.category].append(price_change_pct)
+
+                # Calculate overall trend
+                if all_changes:
+                    avg_change = sum(all_changes) / len(all_changes)
+
+                    st.markdown("---")
+                    st.markdown("**Overall Price Trend**")
+
+                    period_days = (alert_end - alert_start).days
+                    st.metric(
+                        f"Average Price Change ({period_days} days)",
+                        f"{avg_change:+.1f}%",
+                        f"{len(products_with_history)} products tracked"
+                    )
+
+                    # Category breakdown
+                    st.markdown("---")
+                    st.markdown("**By Category**")
+                    cat_cols = st.columns(3)
+
+                    for idx, (cat_name, changes) in enumerate(category_changes.items()):
+                        if changes:
+                            cat_avg = sum(changes) / len(changes)
+                            with cat_cols[idx]:
+                                st.metric(
+                                    cat_name,
+                                    f"{cat_avg:+.1f}%",
+                                    f"{len(changes)} products"
+                                )
+
+                    # Significant changes (above threshold)
+                    st.markdown("---")
+                    st.markdown(f"**Significant Changes (≥{threshold}%)**")
+
+                    increases = []
+                    decreases = []
+
+                    for product in products_with_history:
+                        prices = db.query(PriceHistory).filter(
+                            PriceHistory.product_id == product.id,
+                            PriceHistory.date >= alert_start,
+                            PriceHistory.date <= alert_end
+                        ).order_by(PriceHistory.date.asc()).all()
+
+                        if len(prices) >= 2:
+                            first_price = prices[0].price
+                            last_price = prices[-1].price
+                            price_change = last_price - first_price
+                            price_change_pct = (price_change / first_price) * 100
+
+                            if abs(price_change_pct) >= threshold:
+                                supplier = db.query(Supplier).filter(
+                                    Supplier.id == product.supplier_id
+                                ).first()
+
+                                item = {
+                                    'Product': product.short_name,
+                                    'Brand': product.brand or '-',
+                                    'Category': product.category or '-',
+                                    'Supplier': supplier.short_name if supplier else '-',
+                                    'First Price': first_price,
+                                    'Last Price': last_price,
+                                    'Change': price_change,
+                                    'Change %': price_change_pct,
+                                    'First Date': prices[0].date,
+                                    'Last Date': prices[-1].date
+                                }
+
+                                if price_change_pct > 0:
+                                    increases.append(item)
+                                else:
+                                    decreases.append(item)
+
+                    # Show increases
+                    if increases:
+                        st.markdown(f"**⬆️ Price Increases ({len(increases)} products)**")
+                        increases_df = pd.DataFrame(increases)
+                        increases_df = increases_df.sort_values('Change %', ascending=False)
+
+                        display_df = increases_df.copy()
+                        display_df['First Price'] = display_df['First Price'].apply(lambda x: f"Rp {x:,.0f}")
+                        display_df['Last Price'] = display_df['Last Price'].apply(lambda x: f"Rp {x:,.0f}")
+                        display_df['Change'] = display_df['Change'].apply(lambda x: f"Rp {x:,.0f}")
+                        display_df['Change %'] = display_df['Change %'].apply(lambda x: f"+{x:.1f}%")
+                        display_df['First Date'] = pd.to_datetime(display_df['First Date']).dt.strftime('%d-%b-%Y')
+                        display_df['Last Date'] = pd.to_datetime(display_df['Last Date']).dt.strftime('%d-%b-%Y')
+
+                        st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+                    # Show decreases
+                    if decreases:
+                        st.markdown(f"**⬇️ Price Decreases ({len(decreases)} products)**")
+                        decreases_df = pd.DataFrame(decreases)
+                        decreases_df['Abs Change %'] = decreases_df['Change %'].abs()
+                        decreases_df = decreases_df.sort_values('Abs Change %', ascending=False)
+                        decreases_df = decreases_df.drop('Abs Change %', axis=1)
+
+                        display_df = decreases_df.copy()
+                        display_df['First Price'] = display_df['First Price'].apply(lambda x: f"Rp {x:,.0f}")
+                        display_df['Last Price'] = display_df['Last Price'].apply(lambda x: f"Rp {x:,.0f}")
+                        display_df['Change'] = display_df['Change'].apply(lambda x: f"Rp {x:,.0f}")
+                        display_df['Change %'] = display_df['Change %'].apply(lambda x: f"{x:.1f}%")
+                        display_df['First Date'] = pd.to_datetime(display_df['First Date']).dt.strftime('%d-%b-%Y')
+                        display_df['Last Date'] = pd.to_datetime(display_df['Last Date']).dt.strftime('%d-%b-%Y')
+
+                        st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+                    if not increases and not decreases:
+                        st.info(f"No significant price changes (≥{threshold}%) in this period")
+
+            else:
+                st.info("No price history data available for the selected period")
+
+        finally:
+            db.close()
+
+        # ========================================================================
+        # MANUAL SEARCH (BELOW AUTOMATIC DASHBOARD)
+        # ========================================================================
+        st.markdown("---")
+        st.markdown("#### 🔍 Custom Search")
+        st.caption("Use custom date range and filters for detailed analysis")
+
+        # Date range and threshold
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            alert_start = st.date_input(
+                "From Date",
+                value=st.session_state.alert_start_date,
+                key="alert_start_input"
+            )
+            st.session_state.alert_start_date = alert_start
+        with col2:
+            alert_end = st.date_input(
+                "To Date",
+                value=st.session_state.alert_end_date,
+                key="alert_end_input"
+            )
+            st.session_state.alert_end_date = alert_end
+        with col3:
+            threshold = st.number_input(
+                "Price Increase Threshold (%)",
+                min_value=0.0,
+                max_value=100.0,
+                value=st.session_state.alert_threshold,
+                step=5.0,
+                key="alert_threshold_input"
+            )
+            st.session_state.alert_threshold = threshold
+
+        # Category filter for alerts
+        alert_cat = st.selectbox(
+            "Filter by Category",
+            ["All", "Food", "Drinks", "Operational"],
+            index=["All", "Food", "Drinks", "Operational"].index(st.session_state.alert_category),
+            key="alert_cat_input"
+        )
+        st.session_state.alert_category = alert_cat
+
+        if st.button("🔍 Find Price Increases", type="primary"):
+            db = next(get_db())
+            try:
+                # Query all products with price history in the date range
+                query = db.query(Product).join(
+                    PriceHistory, Product.id == PriceHistory.product_id
+                ).filter(
+                    PriceHistory.date >= alert_start,
+                    PriceHistory.date <= alert_end
+                )
+
+                if alert_cat != "All":
+                    query = query.filter(Product.category == alert_cat)
+
+                products_with_history = query.distinct().all()
+
+                # Analyze each product
+                alerts = []
+                for product in products_with_history:
+                    # Get first and last price in the period
+                    prices = db.query(PriceHistory).filter(
+                        PriceHistory.product_id == product.id,
+                        PriceHistory.date >= alert_start,
+                        PriceHistory.date <= alert_end
+                    ).order_by(PriceHistory.date.asc()).all()
+
+                    if len(prices) >= 2:
+                        first_price = prices[0].price
+                        last_price = prices[-1].price
+                        price_change = last_price - first_price
+                        price_change_pct = (price_change / first_price) * 100
+
+                        if price_change_pct >= threshold:
+                            # Get supplier info
+                            supplier = db.query(Supplier).filter(
+                                Supplier.id == product.supplier_id
+                            ).first()
+
+                            alerts.append({
+                                'Product': product.short_name,
+                                'Brand': product.brand or '-',
+                                'Category': product.category or '-',
+                                'Supplier': supplier.short_name if supplier else '-',
+                                'First Price': first_price,
+                                'Last Price': last_price,
+                                'Change': price_change,
+                                'Change %': price_change_pct,
+                                'First Date': prices[0].date,
+                                'Last Date': prices[-1].date
+                            })
+
+                # Store results in session state
+                st.session_state.alert_results = alerts
+
+            finally:
+                db.close()
+
+        # Display results if they exist
+        if st.session_state.alert_results is not None:
+            alerts = st.session_state.alert_results
+            threshold_display = st.session_state.alert_threshold
+
+            if alerts:
+                st.success(f"Found {len(alerts)} product(s) with price increases ≥ {threshold_display}%")
+
+                # Sort by change percentage (highest first)
+                alerts_df = pd.DataFrame(alerts)
+                alerts_df = alerts_df.sort_values('Change %', ascending=False)
+
+                # Format for display
+                display_df = alerts_df.copy()
+                display_df['First Price'] = display_df['First Price'].apply(lambda x: f"Rp {x:,.0f}")
+                display_df['Last Price'] = display_df['Last Price'].apply(lambda x: f"Rp {x:,.0f}")
+                display_df['Change'] = display_df['Change'].apply(lambda x: f"Rp {x:,.0f}")
+                display_df['Change %'] = display_df['Change %'].apply(lambda x: f"+{x:.1f}%")
+                display_df['First Date'] = pd.to_datetime(display_df['First Date']).dt.strftime('%d-%b-%Y')
+                display_df['Last Date'] = pd.to_datetime(display_df['Last Date']).dt.strftime('%d-%b-%Y')
+
+                st.dataframe(
+                    display_df,
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+                # Summary statistics
+                st.markdown("#### 📊 Summary")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    avg_increase = alerts_df['Change %'].mean()
+                    st.metric("Average Increase", f"{avg_increase:.1f}%")
+                with col2:
+                    max_increase = alerts_df['Change %'].max()
+                    st.metric("Maximum Increase", f"{max_increase:.1f}%")
+                with col3:
+                    total_affected = len(alerts_df)
+                    st.metric("Products Affected", total_affected)
+
+            else:
+                st.info(f"No products found with price increases ≥ {threshold_display}% in the selected period")
+
+    # ============================================================================
+    # TAB 2: PRODUCT PRICE HISTORY
+    # ============================================================================
+    with tab2:
+        st.markdown("### 🔍 Select Product")
+
+        # Product Selection Filters
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            # Category filter
+            categories = ["All", "Food", "Drinks", "Operational"]
+            category_index = categories.index(st.session_state.price_filter_category) if st.session_state.price_filter_category in categories else 0
+            filter_category = st.selectbox("Category", categories, index=category_index, key="price_category")
+            if filter_category != st.session_state.price_filter_category:
+                st.session_state.price_filter_category = filter_category
+                st.session_state.price_selected_product = None  # Reset product when category changes
+
+        with col2:
+            # Supplier filter - filtered by category
+            db_temp = next(get_db())
+
+            # Get suppliers that have products in the selected category
+            supplier_query = db_temp.query(Supplier).join(
+                Product, Product.supplier_id == Supplier.id
+            ).filter(Supplier.is_active == True)
+
+            if filter_category != "All":
+                supplier_query = supplier_query.filter(Product.category == filter_category)
+
+            suppliers = supplier_query.distinct().order_by(Supplier.short_name).all()
+            supplier_names = ["All"] + [s.short_name for s in suppliers]
+            db_temp.close()
+
+            # Reset supplier if it's not in the filtered list
+            if st.session_state.price_filter_supplier not in supplier_names:
+                st.session_state.price_filter_supplier = "All"
+
+            supplier_index = supplier_names.index(st.session_state.price_filter_supplier) if st.session_state.price_filter_supplier in supplier_names else 0
+            filter_supplier = st.selectbox("Supplier", supplier_names, index=supplier_index, key="price_supplier")
+            if filter_supplier != st.session_state.price_filter_supplier:
+                st.session_state.price_filter_supplier = filter_supplier
+                st.session_state.price_selected_product = None  # Reset product when supplier changes
+
+        with col3:
+            # Get products based on filters
+            db_temp = next(get_db())
+            query = db_temp.query(Product).join(Supplier, Product.supplier_id == Supplier.id)
+
+            if filter_category != "All":
+                query = query.filter(Product.category == filter_category)
+            if filter_supplier != "All":
+                query = query.filter(Supplier.short_name == filter_supplier)
+
+            products = query.order_by(Product.short_name).all()
+            db_temp.close()
+
+            if products:
+                product_options = {p.invoice_dropdown_name(): p for p in products}
+                product_names = list(product_options.keys())
+
+                # Find index of previously selected product
+                product_index = 0
+                if st.session_state.price_selected_product and st.session_state.price_selected_product in product_names:
+                    product_index = product_names.index(st.session_state.price_selected_product)
+
+                selected_product_display = st.selectbox("Product", product_names, index=product_index, key="price_product")
+                st.session_state.price_selected_product = selected_product_display
+                selected_product = product_options[selected_product_display]
+            else:
+                st.warning("No products match your filters")
+                selected_product = None
+
+        # If product selected, show price history
+        if selected_product:
+            st.markdown("---")
+            st.markdown("### 📊 Price History")
+
+            # Quick time range selection (Google Finance style)
+            st.markdown("**Quick Select:**")
+            quick_col1, quick_col2, quick_col3, quick_col4, quick_col5 = st.columns(5)
+
+            with quick_col1:
+                if st.button("1 Month", use_container_width=True):
+                    st.session_state.price_start_date = date.today() - timedelta(days=30)
+                    st.session_state.price_end_date = date.today()
+                    st.rerun()
+
+            with quick_col2:
+                if st.button("6 Months", use_container_width=True):
+                    st.session_state.price_start_date = date.today() - timedelta(days=180)
+                    st.session_state.price_end_date = date.today()
+                    st.rerun()
+
+            with quick_col3:
+                if st.button("1 Year", use_container_width=True):
+                    st.session_state.price_start_date = date.today() - timedelta(days=365)
+                    st.session_state.price_end_date = date.today()
+                    st.rerun()
+
+            with quick_col4:
+                if st.button("Max", use_container_width=True):
+                    # Get the earliest price history date for this product
+                    db_temp = next(get_db())
+                    earliest = db_temp.query(PriceHistory).filter(
+                        PriceHistory.product_id == selected_product.id
+                    ).order_by(PriceHistory.date.asc()).first()
+                    db_temp.close()
+
+                    if earliest:
+                        st.session_state.price_start_date = earliest.date
+                        st.session_state.price_end_date = date.today()
+                        st.rerun()
+
+            with quick_col5:
+                # Reset to default
+                if st.button("Reset", use_container_width=True):
+                    st.session_state.price_start_date = date.today() - timedelta(days=90)
+                    st.session_state.price_end_date = date.today()
+                    st.rerun()
+
+            st.markdown("**Custom Range:**")
+            # Date range filter
+            col1, col2 = st.columns(2)
+            with col1:
+                start_date = st.date_input(
+                    "From Date",
+                    value=st.session_state.price_start_date,
+                    key="price_start_date_input"
+                )
+                st.session_state.price_start_date = start_date
+            with col2:
+                end_date = st.date_input(
+                    "To Date",
+                    value=st.session_state.price_end_date,
+                    key="price_end_date_input"
+                )
+                st.session_state.price_end_date = end_date
+
+            # Query price history
+            db = next(get_db())
+            try:
+                price_history = db.query(
+                    PriceHistory.date,
+                    PriceHistory.price,
+                    Supplier.short_name.label('supplier_name'),
+                    Invoice.invoice_number
+                ).join(
+                    Supplier, PriceHistory.supplier_id == Supplier.id
+                ).join(
+                    Invoice, PriceHistory.invoice_id == Invoice.id
+                ).filter(
+                    PriceHistory.product_id == selected_product.id,
+                    PriceHistory.date >= start_date,
+                    PriceHistory.date <= end_date
+                ).order_by(PriceHistory.date.asc()).all()
+
+                if price_history:
+                    # Prepare data for chart
+                    df = pd.DataFrame([
+                        {
+                            'Date': ph.date,
+                            'Price': ph.price,
+                            'Supplier': ph.supplier_name,
+                            'Invoice': ph.invoice_number
+                        }
+                        for ph in price_history
+                    ])
+
+                    # Price Chart
+                    st.markdown("#### 📈 Price Trend")
+                    st.line_chart(df.set_index('Date')['Price'], use_container_width=True)
+
+                    # Price Statistics
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("Current Price", f"Rp {df['Price'].iloc[-1]:,.0f}")
+                    with col2:
+                        avg_price = df['Price'].mean()
+                        st.metric("Average Price", f"Rp {avg_price:,.0f}")
+                    with col3:
+                        min_price = df['Price'].min()
+                        st.metric("Lowest Price", f"Rp {min_price:,.0f}")
+                    with col4:
+                        max_price = df['Price'].max()
+                        st.metric("Highest Price", f"Rp {max_price:,.0f}")
+
+                    # Price change analysis
+                    if len(df) > 1:
+                        first_price = df['Price'].iloc[0]
+                        last_price = df['Price'].iloc[-1]
+                        price_change = last_price - first_price
+                        price_change_pct = (price_change / first_price) * 100
+
+                        st.markdown("#### 📊 Price Change Summary")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.metric(
+                                "Total Change",
+                                f"Rp {price_change:,.0f}",
+                                f"{price_change_pct:+.1f}%"
+                            )
+                        with col2:
+                            volatility = df['Price'].std()
+                            st.metric("Price Volatility (Std Dev)", f"Rp {volatility:,.0f}")
+
+                    # Price History Table
+                    st.markdown("#### 📋 Detailed Price History")
+
+                    # Format the dataframe for display
+                    display_df = df.copy()
+                    display_df['Date'] = pd.to_datetime(display_df['Date']).dt.strftime('%d-%b-%Y')
+                    display_df['Price'] = display_df['Price'].apply(lambda x: f"Rp {x:,.0f}")
+
+                    st.dataframe(
+                        display_df,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+
+                else:
+                    st.info(f"No price history found for this product between {start_date.strftime('%d-%b-%Y')} and {end_date.strftime('%d-%b-%Y')}")
+
+            finally:
+                db.close()
 
 
 # ============================================================================
