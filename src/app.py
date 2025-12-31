@@ -1064,7 +1064,7 @@ def show_market_list():
                 )
                 unit = st.selectbox(
                     "Unit *",
-                    ["Kg", "Lt", "gr", "ml", "pcs", "box", "bottle", "can", "roll"],
+                    ["kg", "liter", "gr", "ml", "pcs", "box", "bottle", "can", "roll"],
                     key="new_product_unit"
                 )
 
@@ -1279,8 +1279,8 @@ def show_market_list():
                             )
                             edit_unit = st.selectbox(
                                 "Unit *",
-                                ["Kg", "Lt", "gr", "ml", "pcs", "box", "bottle", "can", "roll"],
-                                index=["Kg", "Lt", "gr", "ml", "pcs", "box", "bottle", "can", "roll"].index(product.unit) if product.unit in ["Kg", "Lt", "gr", "ml", "pcs", "box", "bottle", "can", "roll"] else 0
+                                ["kg", "liter", "gr", "ml", "pcs", "box", "bottle", "can", "roll"],
+                                index=["kg", "liter", "gr", "ml", "pcs", "box", "bottle", "can", "roll"].index(product.unit) if product.unit in ["kg", "liter", "gr", "ml", "pcs", "box", "bottle", "can", "roll"] else 0
                             )
 
                             # Unit size fields (only for gram/ml/pcs/bottle/box/ctn/pack)
