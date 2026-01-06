@@ -2335,6 +2335,11 @@ def show_invoices_supplies():
                     db = next(get_db())
                     try:
                         invoice = db.query(Invoice).filter(Invoice.id == invoice_to_edit.id).first()
+
+                        # Delete related price_history records first (foreign key constraint)
+                        db.query(PriceHistory).filter(PriceHistory.invoice_id == invoice.id).delete()
+
+                        # Now delete the invoice (invoice items will cascade delete automatically)
                         db.delete(invoice)
                         db.commit()
                         st.success(f"✅ Invoice deleted successfully!")
