@@ -57,10 +57,10 @@ class Supplier(Base):
     )
     ppn_handling = Column(
         String,
-        CheckConstraint("ppn_handling IN ('included', 'added')"),
+        CheckConstraint("ppn_handling IN ('included', 'added', 'manual')"),
         nullable=False,
         default='included'
-    )  # Tax handling: 'included' = final price shown, 'added' = subtotal + PPN
+    )  # Tax handling: 'included' = final price shown, 'added' = subtotal + PPN, 'manual' = choose per invoice
     bank_name = Column(String)
     bank_account_number = Column(String)
     bank_account_name = Column(String)
@@ -102,6 +102,10 @@ class Invoice(Base):
     invoice_file_path = Column(String)
     notes = Column(Text)
     needs_review = Column(Boolean, nullable=False, default=False)  # Flag for "details to check"
+    ppn_handling = Column(
+        String,
+        CheckConstraint("ppn_handling IN ('included', 'added', NULL)")
+    )  # Only used when supplier ppn_handling = 'manual'. NULL means use supplier's default.
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 

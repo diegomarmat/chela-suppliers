@@ -730,8 +730,8 @@ def show_suppliers():
                 payment_terms = st.selectbox("Payment Terms *", ["cash", "2week", "monthly"])
                 ppn_handling = st.selectbox(
                     "PPN (Tax) Handling *",
-                    ["included", "added"],
-                    help="'Included' = final price shown in invoice | 'Added' = subtotal + PPN at bottom"
+                    ["included", "added", "manual"],
+                    help="'Included' = PPN in prices | 'Added' = PPN at bottom | 'Manual' = choose per invoice"
                 )
 
                 # Delivery days selector
@@ -852,9 +852,9 @@ def show_suppliers():
                     )
                     ppn_handling = st.selectbox(
                         "PPN (Tax) Handling *",
-                        ["included", "added"],
-                        index=["included", "added"].index(supplier_to_edit.ppn_handling) if supplier_to_edit.ppn_handling else 0,
-                        help="'Included' = final price shown in invoice | 'Added' = subtotal + PPN at bottom"
+                        ["included", "added", "manual"],
+                        index=["included", "added", "manual"].index(supplier_to_edit.ppn_handling) if supplier_to_edit.ppn_handling else 0,
+                        help="'Included' = PPN in prices | 'Added' = PPN at bottom | 'Manual' = choose per invoice"
                     )
 
                     # Delivery days selector
@@ -1660,8 +1660,19 @@ def show_invoices_supplies():
             st.info(f"**Due Date:** {format_date_input(calculated_due_date)}")
 
         with col_info3:
-            ppn_info = "Included in prices" if ppn_handling == "included" else "Added at bottom (+11%)"
-            st.info(f"**PPN:** {ppn_info}")
+            if ppn_handling == "manual":
+                # Manual PPN - let user choose for this invoice
+                invoice_ppn = st.selectbox(
+                    "PPN for this invoice *",
+                    ["included", "added"],
+                    help="Choose PPN handling for this specific invoice",
+                    key="invoice_ppn_select"
+                )
+            else:
+                # Fixed PPN - just show info
+                ppn_info = "Included in prices" if ppn_handling == "included" else "Added at bottom (+11%)"
+                st.info(f"**PPN:** {ppn_info}")
+                invoice_ppn = ppn_handling  # Use supplier's default
 
         st.markdown("---")
 
@@ -1768,8 +1779,8 @@ def show_invoices_supplies():
             # Calculate totals
             subtotal = sum(item['total'] for item in st.session_state.line_items)
 
-            # Show totals based on PPN handling
-            if ppn_handling == "added":
+            # Show totals based on PPN handling (use invoice_ppn which is either supplier's or manually selected)
+            if invoice_ppn == "added":
                 st.markdown("### 🧮 Invoice Totals")
                 col_calc1, col_calc2 = st.columns(2)
 
@@ -1852,7 +1863,8 @@ def show_invoices_supplies():
                             due_date=due_date,
                             total_amount=total_amount,
                             notes=notes or None,
-                            needs_review=needs_review
+                            needs_review=needs_review,
+                            ppn_handling=invoice_ppn if ppn_handling == "manual" else None
                         )
                         db.add(new_invoice)
                         db.flush()  # Get invoice ID
@@ -2154,6 +2166,22 @@ def show_invoices_supplies():
                     st.text_input("Payment Terms", value=payment_info, disabled=True)
                     st.text_input("Due Date (auto-calculated)", value=format_date_input(calculated_due_date), disabled=True)
 
+                    # PPN handling - show selector if supplier uses manual
+                    if selected_supplier_obj.ppn_handling == "manual":
+                        # Get current invoice PPN or default to 'included'
+                        current_ppn = invoice_to_edit.ppn_handling if invoice_to_edit.ppn_handling else "included"
+                        edit_invoice_ppn = st.selectbox(
+                            "PPN for this invoice *",
+                            ["included", "added"],
+                            index=["included", "added"].index(current_ppn),
+                            help="Choose PPN handling for this specific invoice"
+                        )
+                    else:
+                        # Fixed PPN - just show info
+                        ppn_info = "Included in prices" if selected_supplier_obj.ppn_handling == "included" else "Added at bottom (+11%)"
+                        st.text_input("PPN Handling", value=ppn_info, disabled=True)
+                        edit_invoice_ppn = None  # Will not update invoice PPN
+
                 notes = st.text_area("Notes", value=invoice_to_edit.notes or "")
 
                 needs_review = st.checkbox(
@@ -2189,6 +2217,9 @@ def show_invoices_supplies():
                             invoice.total_amount = total_amount  # Now auto-calculated from line items
                             invoice.notes = notes or None
                             invoice.needs_review = needs_review
+                            # Update PPN handling only if supplier uses manual
+                            if edit_invoice_ppn is not None:
+                                invoice.ppn_handling = edit_invoice_ppn
 
                             # Delete old PriceHistory records for this invoice (before deleting invoice items)
                             db.query(PriceHistory).filter(PriceHistory.invoice_id == invoice.id).delete()
@@ -2509,6 +2540,12 @@ def show_invoices_others():
             selected_index = expense_options.index(selected_option)
             expense_to_edit = expenses[selected_index]
 
+            # Track selection changes to force form re-render
+            if 'edit_others_expense_id' not in st.session_state or st.session_state.edit_others_expense_id != expense_to_edit.id:
+                st.session_state.edit_others_expense_id = expense_to_edit.id
+                # Force a rerun to update form values
+                st.rerun()
+
             st.markdown("---")
 
             # Edit form
@@ -2524,13 +2561,12 @@ def show_invoices_others():
                     current_supplier_index = supplier_names.index(expense_to_edit.supplier.short_name)
                     db.close()
 
-                    selected_supplier = st.selectbox("Supplier *", supplier_names, index=current_supplier_index, key="edit_others_supplier")
+                    selected_supplier = st.selectbox("Supplier *", supplier_names, index=current_supplier_index)
 
                     invoice_date = st.date_input(
                         "Invoice Date *",
                         value=expense_to_edit.invoice_date,
-                        format="DD/MM/YYYY",
-                        key="edit_others_date"
+                        format="DD/MM/YYYY"
                     )
 
                 with col2:
@@ -2538,22 +2574,19 @@ def show_invoices_others():
                         "Total Amount (IDR) *",
                         min_value=0.0,
                         step=1000.0,
-                        value=float(expense_to_edit.total_amount),
-                        key="edit_others_amount"
+                        value=float(expense_to_edit.total_amount)
                     )
 
                     payment_method = st.selectbox(
                         "Payment Method",
                         ["", "cash", "transfer"],
-                        index=(["", "cash", "transfer"].index(expense_to_edit.payment_method) if expense_to_edit.payment_method else 0),
-                        key="edit_others_payment_method"
+                        index=(["", "cash", "transfer"].index(expense_to_edit.payment_method) if expense_to_edit.payment_method else 0)
                     )
 
                 # Notes (full width)
                 notes = st.text_area(
                     "Notes",
                     value=expense_to_edit.notes or "",
-                    key="edit_others_notes",
                     help="Any additional details about this expense"
                 )
 
@@ -2561,7 +2594,6 @@ def show_invoices_others():
                 needs_review = st.checkbox(
                     "⚠️ Needs review",
                     value=expense_to_edit.needs_review,
-                    key="edit_others_needs_review",
                     help="Check if there are details to verify later"
                 )
 
