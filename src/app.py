@@ -1116,9 +1116,9 @@ def show_market_list():
                 with col_size2:
                     unit_size_measurement = st.selectbox(
                         "Measurement",
-                        ["", "g", "ml"],
+                        ["", "g", "ml", "pcs"],
                         key="new_product_unit_size_measurement",
-                        help="E.g., 1 bottle = 1000ml → select 'ml', or 500 grams → select 'g'"
+                        help="E.g., 1 bottle = 1000ml → 'ml', 500 grams → 'g', 6 pack → 6 'pcs'"
                     )
 
             with col2:
@@ -1332,16 +1332,16 @@ def show_market_list():
                             with col_size2:
                                 current_measurement_index = 0
                                 if product.unit_size_measurement:
-                                    measurement_options = ["", "g", "ml"]
+                                    measurement_options = ["", "g", "ml", "pcs"]
                                     if product.unit_size_measurement in measurement_options:
                                         current_measurement_index = measurement_options.index(product.unit_size_measurement)
 
                                 edit_unit_size_measurement = st.selectbox(
                                     "Measurement",
-                                    ["", "g", "ml"],
+                                    ["", "g", "ml", "pcs"],
                                     index=current_measurement_index,
                                     key=f"edit_product_unit_size_measurement_{product.id}",
-                                    help="E.g., 1 bottle = 1000ml → select 'ml', or 500 grams → select 'g'"
+                                    help="E.g., 1 bottle = 1000ml → 'ml', 500 grams → 'g', 6 pack → 6 'pcs'"
                                 )
 
                         with col2:
