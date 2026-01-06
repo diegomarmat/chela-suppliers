@@ -2159,6 +2159,12 @@ def show_invoices_supplies():
                     db = next(get_db())
                     suppliers = db.query(Supplier).filter(Supplier.is_active == True).order_by(Supplier.short_name).all()
                     supplier_names = [s.short_name for s in suppliers]
+
+                    # Add current supplier if not in list (e.g., if inactive)
+                    if invoice_to_edit.supplier.short_name not in supplier_names:
+                        supplier_names.insert(0, invoice_to_edit.supplier.short_name)
+                        suppliers.insert(0, invoice_to_edit.supplier)
+
                     current_supplier_index = supplier_names.index(invoice_to_edit.supplier.short_name)
                     db.close()
 
