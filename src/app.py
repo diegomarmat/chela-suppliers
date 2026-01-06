@@ -2444,7 +2444,193 @@ def show_invoices_others():
     # TAB 3: EDIT/DELETE OTHERS
     with tab3:
         st.markdown("### ✏️ Edit/Delete Other Operational Expense")
-        st.info("🚧 Edit/Delete functionality coming soon")
+
+        # Filters
+        st.markdown("**🔍 Find Expense**")
+        col_filter1, col_filter2 = st.columns(2)
+
+        with col_filter1:
+            # Supplier filter
+            db = next(get_db())
+            suppliers = db.query(Supplier).filter(Supplier.is_active == True).order_by(Supplier.short_name).all()
+            supplier_names = ["All"] + [s.short_name for s in suppliers]
+            db.close()
+
+            filter_supplier = st.selectbox("Filter by Supplier", supplier_names, key="edit_others_supplier_filter")
+
+        with col_filter2:
+            # Month and Year dropdowns
+            col_month, col_year = st.columns(2)
+
+            with col_month:
+                months = ["All", "January", "February", "March", "April", "May", "June",
+                         "July", "August", "September", "October", "November", "December"]
+                filter_month = st.selectbox("Month", months, index=date.today().month, key="edit_others_month_filter")
+
+            with col_year:
+                current_year = date.today().year
+                years = ["All"] + [str(y) for y in range(current_year - 2, current_year + 2)]
+                filter_year = st.selectbox("Year", years, index=3, key="edit_others_year_filter")  # index=3 is current year
+
+        # Get filtered "Others" invoices (invoice_number is None)
+        db = next(get_db())
+        from sqlalchemy.orm import joinedload
+        query = db.query(Invoice).options(joinedload(Invoice.supplier)).filter(Invoice.invoice_number == None)
+
+        # Apply supplier filter
+        if filter_supplier != "All":
+            supplier = db.query(Supplier).filter(Supplier.short_name == filter_supplier).first()
+            if supplier:
+                query = query.filter(Invoice.supplier_id == supplier.id)
+
+        # Apply month/year filter
+        if filter_month != "All" and filter_year != "All":
+            month_num = months.index(filter_month)  # 1-12
+            year_num = int(filter_year)
+            month_start = date(year_num, month_num, 1)
+            if month_num == 12:
+                month_end = date(year_num + 1, 1, 1)
+            else:
+                month_end = date(year_num, month_num + 1, 1)
+            query = query.filter(Invoice.invoice_date >= month_start, Invoice.invoice_date < month_end)
+        elif filter_year != "All":
+            # Year only filter
+            year_num = int(filter_year)
+            query = query.filter(Invoice.invoice_date >= date(year_num, 1, 1), Invoice.invoice_date < date(year_num + 1, 1, 1))
+
+        expenses = query.order_by(Invoice.invoice_date.desc()).all()
+
+        if not expenses:
+            db.close()
+            st.info("No expenses match your filters. Try different filters or add an expense first!")
+        else:
+            # Build expense options
+            expense_options = [
+                f"{exp.supplier.short_name} - {format_currency(exp.total_amount)} - {exp.invoice_date.strftime('%d/%m/%Y')}"
+                for exp in expenses
+            ]
+            db.close()
+
+            st.markdown(f"**Found {len(expenses)} expense(s)**")
+            selected_option = st.selectbox("Select Expense to Edit/Delete", expense_options, key="edit_others_select")
+
+            # Get the selected expense
+            selected_index = expense_options.index(selected_option)
+            expense_to_edit = expenses[selected_index]
+
+            st.markdown("---")
+
+            # Edit form
+            with st.form("edit_others_form"):
+                st.markdown("**Edit Expense Details**")
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    # Supplier dropdown (can change supplier)
+                    db = next(get_db())
+                    suppliers = db.query(Supplier).filter(Supplier.is_active == True).order_by(Supplier.short_name).all()
+                    supplier_names = [s.short_name for s in suppliers]
+                    current_supplier_index = supplier_names.index(expense_to_edit.supplier.short_name)
+                    db.close()
+
+                    selected_supplier = st.selectbox("Supplier *", supplier_names, index=current_supplier_index, key="edit_others_supplier")
+
+                    invoice_date = st.date_input(
+                        "Invoice Date *",
+                        value=expense_to_edit.invoice_date,
+                        format="DD/MM/YYYY",
+                        key="edit_others_date"
+                    )
+
+                with col2:
+                    total_amount = st.number_input(
+                        "Total Amount (IDR) *",
+                        min_value=0.0,
+                        step=1000.0,
+                        value=float(expense_to_edit.total_amount),
+                        key="edit_others_amount"
+                    )
+
+                    payment_method = st.selectbox(
+                        "Payment Method",
+                        ["", "cash", "transfer"],
+                        index=(["", "cash", "transfer"].index(expense_to_edit.payment_method) if expense_to_edit.payment_method else 0),
+                        key="edit_others_payment_method"
+                    )
+
+                # Notes (full width)
+                notes = st.text_area(
+                    "Notes",
+                    value=expense_to_edit.notes or "",
+                    key="edit_others_notes",
+                    help="Any additional details about this expense"
+                )
+
+                # Needs review checkbox
+                needs_review = st.checkbox(
+                    "⚠️ Needs review",
+                    value=expense_to_edit.needs_review,
+                    key="edit_others_needs_review",
+                    help="Check if there are details to verify later"
+                )
+
+                # Submit buttons
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    update_submitted = st.form_submit_button("💾 Update Expense", use_container_width=True)
+                with col_btn2:
+                    delete_submitted = st.form_submit_button("🗑️ Delete Expense", use_container_width=True, type="secondary")
+
+                if update_submitted:
+                    if total_amount <= 0:
+                        st.error("❌ Amount must be greater than 0")
+                    else:
+                        try:
+                            db = next(get_db())
+
+                            # Get the expense to update
+                            expense = db.query(Invoice).filter(Invoice.id == expense_to_edit.id).first()
+
+                            # Get new supplier
+                            new_supplier = db.query(Supplier).filter(Supplier.short_name == selected_supplier).first()
+
+                            # Update fields
+                            expense.supplier_id = new_supplier.id
+                            expense.invoice_date = invoice_date
+                            expense.total_amount = total_amount
+                            expense.payment_method = payment_method if payment_method else None
+                            expense.payment_status = 'paid' if payment_method else 'pending'
+                            expense.payment_date = invoice_date if payment_method else None
+                            expense.notes = notes if notes else None
+                            expense.needs_review = needs_review
+
+                            db.commit()
+                            st.success(f"✅ Expense updated successfully!")
+                            st.rerun()
+                        except Exception as e:
+                            db.rollback()
+                            st.error(f"❌ Error updating expense: {str(e)}")
+                        finally:
+                            db.close()
+
+                if delete_submitted:
+                    try:
+                        db = next(get_db())
+
+                        # Get the expense to delete
+                        expense = db.query(Invoice).filter(Invoice.id == expense_to_edit.id).first()
+
+                        # Delete it
+                        db.delete(expense)
+                        db.commit()
+
+                        st.success(f"✅ Expense deleted successfully!")
+                        st.rerun()
+                    except Exception as e:
+                        db.rollback()
+                        st.error(f"❌ Error deleting expense: {str(e)}")
+                    finally:
+                        db.close()
 
 
 def show_payments():
@@ -2929,7 +3115,9 @@ def show_purchase_tracking():
             db_temp.close()
 
             if products:
-                product_names = [p.short_name for p in products]
+                # Create product display names with brand
+                product_display_map = {f"{p.short_name} - {p.brand}": p for p in products}
+                product_names = list(product_display_map.keys())
                 # Find index of previously selected product
                 product_index = 0
                 if st.session_state.pt_selected_product and st.session_state.pt_selected_product in product_names:
@@ -2937,7 +3125,7 @@ def show_purchase_tracking():
 
                 selected_product_name = st.selectbox("Product", product_names, index=product_index, key="pt_product")
                 st.session_state.pt_selected_product = selected_product_name
-                selected_product = next(p for p in products if p.short_name == selected_product_name)
+                selected_product = product_display_map[selected_product_name]
             else:
                 st.warning("No products match your filters")
                 selected_product = None
