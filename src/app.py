@@ -8,9 +8,9 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, date, timedelta
 from models import (
-    get_db, Supplier, Invoice, InvoiceItem, Product, PriceHistory, DashboardNotes, init_db
+    get_db, Supplier, Invoice, InvoiceItem, Product, PriceHistory, DashboardNotes, init_db, engine
 )
-from sqlalchemy import func
+from sqlalchemy import func, text, inspect
 from PIL import Image
 import pillow_heif
 import io
@@ -22,6 +22,40 @@ from reportlab.lib.units import inch
 
 # Initialize database tables (create if not exists)
 init_db()
+
+# Auto-run PPN migration if needed (backward compatible)
+try:
+    inspector = inspect(engine)
+    columns = [col['name'] for col in inspector.get_columns('invoices')]
+
+    if 'ppn_handling' not in columns:
+        print("🔧 Running automatic PPN migration...")
+        with engine.connect() as conn:
+            # Add ppn_handling column to invoices
+            conn.execute(text("""
+                ALTER TABLE invoices
+                ADD COLUMN IF NOT EXISTS ppn_handling VARCHAR
+                CHECK (ppn_handling IN ('included', 'added', NULL))
+            """))
+
+            # Update suppliers constraint for PostgreSQL
+            try:
+                conn.execute(text("""
+                    ALTER TABLE suppliers
+                    DROP CONSTRAINT IF EXISTS suppliers_ppn_handling_check
+                """))
+                conn.execute(text("""
+                    ALTER TABLE suppliers
+                    ADD CONSTRAINT suppliers_ppn_handling_check
+                    CHECK (ppn_handling IN ('included', 'added', 'manual'))
+                """))
+            except:
+                pass  # SQLite doesn't support this, but it's lenient anyway
+
+            conn.commit()
+            print("✅ PPN migration completed automatically")
+except Exception as e:
+    print(f"⚠️  Auto-migration check: {str(e)}")
 
 # Auto-stamp Alembic on first deployment (one-time setup)
 try:
