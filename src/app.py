@@ -2316,58 +2316,49 @@ def show_invoices_others():
     with tab2:
         st.markdown("### ➕ Add Other Operational Expense")
 
+        # Supplier and Invoice Date selection OUTSIDE form for dynamic updates
+        col_select1, col_select2 = st.columns(2)
+
+        # Get suppliers
+        db = next(get_db())
+        suppliers = db.query(Supplier).filter(Supplier.is_active == True).order_by(Supplier.short_name).all()
+        db.close()
+
+        if not suppliers:
+            st.warning("⚠️ No suppliers found. Please add a supplier first!")
+            return
+
+        with col_select1:
+            supplier_names = [s.short_name for s in suppliers]
+            selected_supplier_name = st.selectbox(
+                "Select Supplier *",
+                supplier_names,
+                key="others_supplier_select"
+            )
+
+        with col_select2:
+            invoice_date = st.date_input(
+                "Invoice Date *",
+                value=date.today(),
+                format="DD/MM/YYYY",
+                key="others_date_select"
+            )
+
+        # Get selected supplier object
+        selected_supplier = next(s for s in suppliers if s.short_name == selected_supplier_name)
+
+        # Display supplier info (updates dynamically when supplier changes)
+        col_info1, col_info2 = st.columns(2)
+        with col_info1:
+            st.info(f"**Category:** {selected_supplier.category or 'Not set'}")
+        with col_info2:
+            payment_terms_display = selected_supplier.payment_terms.upper() if selected_supplier.payment_terms else "Not set"
+            st.info(f"**Payment Terms:** {payment_terms_display}")
+
+        st.markdown("---")
+
+        # Invoice Details Form
         with st.form("add_others_form"):
-            # SECTION 1: Supplier Selection
-            st.markdown("**📋 Supplier Selection**")
-            col1, col2 = st.columns(2)
-
-            with col1:
-                # Supplier dropdown
-                db = next(get_db())
-                suppliers = db.query(Supplier).filter(Supplier.is_active == True).order_by(Supplier.short_name).all()
-                supplier_options = {s.short_name: s for s in suppliers}  # Store supplier object, not just ID
-                db.close()
-
-                selected_supplier_name = st.selectbox(
-                    "Supplier *",
-                    options=list(supplier_options.keys()),
-                    key="others_supplier"
-                )
-
-            with col2:
-                # Full date selector (same as Supplies invoices)
-                invoice_date = st.date_input(
-                    "Invoice Date *",
-                    value=datetime.now(),
-                    format="DD/MM/YYYY",
-                    key="others_date"
-                )
-
-            # SECTION 2: Supplier Info (auto-filled, view-only)
-            if selected_supplier_name:
-                selected_supplier = supplier_options[selected_supplier_name]
-
-                st.markdown("---")
-                st.markdown("**ℹ️ Supplier Information** (auto-filled)")
-
-                col_info1, col_info2 = st.columns(2)
-                with col_info1:
-                    st.text_input(
-                        "Category",
-                        value=selected_supplier.category or "Not set",
-                        disabled=True,
-                        key="others_category_display"
-                    )
-                with col_info2:
-                    st.text_input(
-                        "Payment Terms",
-                        value=selected_supplier.payment_terms.upper() if selected_supplier.payment_terms else "Not set",
-                        disabled=True,
-                        key="others_payment_terms_display"
-                    )
-
-            # SECTION 3: Invoice Details (manual entry)
-            st.markdown("---")
             st.markdown("**💰 Invoice Details**")
 
             col3, col4 = st.columns(2)
