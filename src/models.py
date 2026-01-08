@@ -61,6 +61,7 @@ class Supplier(Base):
         nullable=False,
         default='included'
     )  # Tax handling: 'included' = final price shown, 'added' = subtotal + PPN, 'manual' = choose per invoice
+    ppn_rate = Column(Float, default=11.0)  # PPN rate percentage (e.g., 11.0 for 11%, 10.0 for 10%)
     bank_name = Column(String)
     bank_account_number = Column(String)
     bank_account_name = Column(String)
@@ -128,8 +129,11 @@ class InvoiceItem(Base):
     category = Column(String)
     quantity = Column(Float, nullable=False)
     unit = Column(String, nullable=False)
-    unit_price = Column(Float, nullable=False)
-    total_price = Column(Float, nullable=False)
+    unit_price = Column(Float, nullable=False)  # Pre-discount, pre-PPN price
+    discount_percentage = Column(Float)  # Discount % applied (nullable - only if has discount)
+    ppn_percentage = Column(Float)  # PPN % applied (nullable for backward compatibility)
+    ppn_amount = Column(Float)  # Calculated PPN amount (nullable for backward compatibility)
+    total_price = Column(Float, nullable=False)  # Final price after discount + PPN
     notes = Column(Text)
     created_at = Column(DateTime, default=datetime.now)
 
