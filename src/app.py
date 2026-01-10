@@ -1724,6 +1724,7 @@ def show_invoices_supplies():
         selected_supplier_obj = next(s for s in suppliers if s.short_name == selected_supplier)
         payment_terms = selected_supplier_obj.payment_terms
         ppn_handling = selected_supplier_obj.ppn_handling
+        supplier_ppn_rate = selected_supplier_obj.ppn_rate if selected_supplier_obj.ppn_rate is not None else 11.0
 
         # Calculate due date based on invoice date and payment terms
         calculated_due_date = calculate_due_date(invoice_date, payment_terms)
@@ -1832,7 +1833,13 @@ def show_invoices_supplies():
 
             # Row 2: Discount % input (conditional) and calculation preview
             if has_discount:
-                col_disc1, col_disc2, col_disc3, col_disc4 = st.columns([2.5, 1.3, 1.5, 0.4])
+                # Adjust columns based on whether PPN input is needed
+                if invoice_ppn == 'added':
+                    col_disc1, col_disc2, col_disc3, col_disc4, col_disc5 = st.columns([2.5, 1, 0.8, 1.2, 0.4])
+                else:
+                    col_disc1, col_disc2, col_disc4, col_disc5 = st.columns([2.5, 1.3, 1.5, 0.4])
+                    col_disc3 = None  # No PPN input column when included
+
                 with col_disc1:
                     st.write("")  # Spacer
                 with col_disc2:
@@ -1845,7 +1852,24 @@ def show_invoices_supplies():
                         key="item_discount_pct",
                         label_visibility="collapsed"
                     )
-                with col_disc3:
+
+                # PPN % input (only when PPN is added)
+                if invoice_ppn == 'added' and col_disc3:
+                    with col_disc3:
+                        item_ppn_rate = st.number_input(
+                            "PPN %",
+                            min_value=0.0,
+                            max_value=100.0,
+                            value=supplier_ppn_rate,
+                            step=0.5,
+                            key=f"item_ppn_pct_disc_{selected_supplier_obj.id}",
+                            label_visibility="collapsed"
+                        )
+                        st.caption("PPN %")
+                else:
+                    item_ppn_rate = 0.0
+
+                with col_disc4:
                     # Calculate and show preview
                     if item_qty and item_price:
                         try:
@@ -1854,14 +1878,13 @@ def show_invoices_supplies():
                             subtotal = qty * price
                             discount_amt = subtotal * (discount_pct / 100)
                             after_discount = subtotal - discount_amt
-                            ppn_rate = selected_supplier_obj.ppn_rate or 0.0
-                            ppn_amt = after_discount * (ppn_rate / 100) if invoice_ppn == 'added' else 0
+                            ppn_amt = after_discount * (item_ppn_rate / 100) if invoice_ppn == 'added' else 0
                             line_total = after_discount + ppn_amt
                             st.caption(f"PPN: {format_currency(ppn_amt)}")
                             st.caption(f"**Total: {format_currency(line_total)}**")
                         except:
                             st.caption("Enter qty & price")
-                with col_disc4:
+                with col_disc5:
                     if st.button("➕", key="add_item_btn_disc", help="Add item", use_container_width=True):
                         if item_qty and item_price:
                             try:
@@ -1870,8 +1893,7 @@ def show_invoices_supplies():
                                 subtotal = qty * price
                                 discount_amt = subtotal * (discount_pct / 100)
                                 after_discount = subtotal - discount_amt
-                                ppn_rate = selected_supplier_obj.ppn_rate or 0.0
-                                ppn_amt = after_discount * (ppn_rate / 100) if invoice_ppn == 'added' else 0
+                                ppn_amt = after_discount * (item_ppn_rate / 100) if invoice_ppn == 'added' else 0
                                 line_total = after_discount + ppn_amt
 
                                 st.session_state.line_items.append({
@@ -1880,7 +1902,7 @@ def show_invoices_supplies():
                                     'unit': selected_product.unit,
                                     'unit_price': price,
                                     'discount_percentage': discount_pct,
-                                    'ppn_percentage': ppn_rate if invoice_ppn == 'added' else 0.0,
+                                    'ppn_percentage': item_ppn_rate if invoice_ppn == 'added' else 0.0,
                                     'ppn_amount': ppn_amt,
                                     'total': line_total,
                                     'product_id': selected_product.id
@@ -1892,32 +1914,53 @@ def show_invoices_supplies():
                             st.warning("Please fill in quantity and price")
             else:
                 # No discount - simpler flow
-                col_nodisc1, col_nodisc2, col_nodisc3 = st.columns([2.5, 2.8, 0.4])
+                # Adjust columns based on whether PPN input is needed
+                if invoice_ppn == 'added':
+                    col_nodisc1, col_nodisc2, col_nodisc3, col_nodisc4 = st.columns([2.5, 0.8, 1.5, 0.4])
+                else:
+                    col_nodisc1, col_nodisc3, col_nodisc4 = st.columns([2.5, 2.8, 0.4])
+                    col_nodisc2 = None  # No PPN input column when included
+
                 with col_nodisc1:
                     st.write("")  # Spacer
-                with col_nodisc2:
+
+                # PPN % input (only when PPN is added)
+                if invoice_ppn == 'added' and col_nodisc2:
+                    with col_nodisc2:
+                        item_ppn_rate_nodisc = st.number_input(
+                            "PPN %",
+                            min_value=0.0,
+                            max_value=100.0,
+                            value=supplier_ppn_rate,
+                            step=0.5,
+                            key=f"item_ppn_pct_nodisc_{selected_supplier_obj.id}",
+                            label_visibility="collapsed"
+                        )
+                        st.caption("PPN %")
+                else:
+                    item_ppn_rate_nodisc = 0.0
+
+                with col_nodisc3:
                     # Calculate and show preview
                     if item_qty and item_price:
                         try:
                             qty = float(item_qty.replace('.', '').replace(',', '.'))
                             price = float(item_price.replace('.', '').replace(',', ''))
                             subtotal = qty * price
-                            ppn_rate = selected_supplier_obj.ppn_rate or 0.0
-                            ppn_amt = subtotal * (ppn_rate / 100) if invoice_ppn == 'added' else 0
+                            ppn_amt = subtotal * (item_ppn_rate_nodisc / 100) if invoice_ppn == 'added' else 0
                             line_total = subtotal + ppn_amt
                             st.caption(f"PPN: {format_currency(ppn_amt)}")
                             st.caption(f"**Total: {format_currency(line_total)}**")
                         except:
                             st.caption("Enter qty & price")
-                with col_nodisc3:
+                with col_nodisc4:
                     if st.button("➕", key="add_item_btn_nodisc", help="Add item", use_container_width=True):
                         if item_qty and item_price:
                             try:
                                 qty = float(item_qty.replace('.', '').replace(',', '.'))
                                 price = float(item_price.replace('.', '').replace(',', ''))
                                 subtotal = qty * price
-                                ppn_rate = selected_supplier_obj.ppn_rate or 0.0
-                                ppn_amt = subtotal * (ppn_rate / 100) if invoice_ppn == 'added' else 0
+                                ppn_amt = subtotal * (item_ppn_rate_nodisc / 100) if invoice_ppn == 'added' else 0
                                 line_total = subtotal + ppn_amt
 
                                 st.session_state.line_items.append({
@@ -1926,7 +1969,7 @@ def show_invoices_supplies():
                                     'unit': selected_product.unit,
                                     'unit_price': price,
                                     'discount_percentage': None,
-                                    'ppn_percentage': ppn_rate if invoice_ppn == 'added' else 0.0,
+                                    'ppn_percentage': item_ppn_rate_nodisc if invoice_ppn == 'added' else 0.0,
                                     'ppn_amount': ppn_amt,
                                     'total': line_total,
                                     'product_id': selected_product.id
@@ -2246,9 +2289,21 @@ def show_invoices_supplies():
                 with col_item4:
                     edit_has_discount = st.checkbox("Disc", key="edit_item_discount_checkbox", help="Has discount?")
 
-                # Row 2: Conditional discount field, PPN preview, Line total, Add button
+                # Row 2: Conditional discount field, PPN input, PPN preview, Line total, Add button
+                # Get supplier's PPN handling for this invoice
+                db = next(get_db())
+                selected_supplier_obj = db.query(Supplier).filter(Supplier.id == invoice_to_edit.supplier.id).first()
+                db.close()
+                supplier_ppn_rate = selected_supplier_obj.ppn_rate if selected_supplier_obj.ppn_rate is not None else 11.0
+                invoice_ppn = invoice_to_edit.ppn_handling or selected_supplier_obj.ppn_handling
+
                 if edit_has_discount:
-                    col_disc1, col_disc2, col_disc3, col_disc4 = st.columns([1, 1.5, 1.5, 0.5])
+                    # Adjust columns based on whether PPN input is needed
+                    if invoice_ppn == 'added':
+                        col_disc1, col_disc2, col_disc3, col_disc4, col_disc5 = st.columns([1, 0.8, 1.2, 1.2, 0.5])
+                    else:
+                        col_disc1, col_disc3, col_disc4, col_disc5 = st.columns([1, 1.5, 1.5, 0.5])
+                        col_disc2 = None  # No PPN input column when included
 
                     with col_disc1:
                         edit_discount_pct = st.number_input(
@@ -2261,6 +2316,22 @@ def show_invoices_supplies():
                             label_visibility="collapsed"
                         )
                         st.caption("Discount %")
+
+                    # PPN % input (only when PPN is added)
+                    if invoice_ppn == 'added' and col_disc2:
+                        with col_disc2:
+                            edit_item_ppn_rate = st.number_input(
+                                "PPN %",
+                                min_value=0.0,
+                                max_value=100.0,
+                                value=supplier_ppn_rate,
+                                step=0.5,
+                                key=f"edit_item_ppn_pct_disc_{invoice_to_edit.supplier.id}",
+                                label_visibility="collapsed"
+                            )
+                            st.caption("PPN %")
+                    else:
+                        edit_item_ppn_rate = 0.0
 
                     # Calculate preview if qty and price are entered
                     edit_ppn_preview = 0
@@ -2275,23 +2346,15 @@ def show_invoices_supplies():
                             discount_amt = subtotal * (edit_discount_pct / 100)
                             after_discount = subtotal - discount_amt
 
-                            # Get supplier's PPN rate
-                            db = next(get_db())
-                            selected_supplier_obj = db.query(Supplier).filter(Supplier.id == invoice_to_edit.supplier.id).first()
-                            db.close()
-
-                            ppn_rate = selected_supplier_obj.ppn_rate or 0.0
-                            invoice_ppn = invoice_to_edit.ppn_handling or selected_supplier_obj.ppn_handling
-
                             # Calculate PPN if "added"
                             if invoice_ppn == 'added':
-                                edit_ppn_preview = after_discount * (ppn_rate / 100)
+                                edit_ppn_preview = after_discount * (edit_item_ppn_rate / 100)
 
                             edit_total_preview = after_discount + edit_ppn_preview
                         except:
                             pass
 
-                    with col_disc2:
+                    with col_disc3:
                         st.text_input(
                             "PPN Amount",
                             value=f"{format_currency(edit_ppn_preview)}" if edit_ppn_preview > 0 else "No PPN",
@@ -2299,9 +2362,9 @@ def show_invoices_supplies():
                             disabled=True,
                             label_visibility="collapsed"
                         )
-                        st.caption("PPN")
+                        st.caption("PPN Amt")
 
-                    with col_disc3:
+                    with col_disc4:
                         st.text_input(
                             "Line Total",
                             value=format_currency(edit_total_preview) if edit_total_preview > 0 else "-",
@@ -2311,7 +2374,7 @@ def show_invoices_supplies():
                         )
                         st.caption("Total")
 
-                    with col_disc4:
+                    with col_disc5:
                         if st.button("➕", key="edit_add_item_with_discount_btn", help="Add item with discount", use_container_width=True):
                             if edit_item_qty and edit_item_price:
                                 try:
@@ -2324,18 +2387,10 @@ def show_invoices_supplies():
                                     discount_amt = subtotal * (edit_discount_pct / 100)
                                     after_discount = subtotal - discount_amt
 
-                                    # Get PPN rate and handling
-                                    db = next(get_db())
-                                    selected_supplier_obj = db.query(Supplier).filter(Supplier.id == invoice_to_edit.supplier.id).first()
-                                    db.close()
-
-                                    ppn_rate = selected_supplier_obj.ppn_rate or 0.0
-                                    invoice_ppn = invoice_to_edit.ppn_handling or selected_supplier_obj.ppn_handling
-
                                     # Calculate PPN
                                     ppn_amt = 0
                                     if invoice_ppn == 'added':
-                                        ppn_amt = after_discount * (ppn_rate / 100)
+                                        ppn_amt = after_discount * (edit_item_ppn_rate / 100)
 
                                     line_total = after_discount + ppn_amt
 
@@ -2345,7 +2400,7 @@ def show_invoices_supplies():
                                         'unit': selected_product.unit,
                                         'unit_price': price,
                                         'discount_percentage': edit_discount_pct if edit_discount_pct > 0 else None,
-                                        'ppn_percentage': ppn_rate if invoice_ppn == 'added' else 0.0,
+                                        'ppn_percentage': edit_item_ppn_rate if invoice_ppn == 'added' else 0.0,
                                         'ppn_amount': ppn_amt,
                                         'total': line_total,
                                         'product_id': selected_product.id
@@ -2357,8 +2412,29 @@ def show_invoices_supplies():
                                 st.warning("Please fill in quantity and price")
 
                 else:
-                    # No discount - simpler layout with just PPN preview and Add button
-                    col_no_disc1, col_no_disc2, col_no_disc3 = st.columns([2, 1.5, 0.5])
+                    # No discount - simpler layout with PPN input (when added), preview and Add button
+                    # Adjust columns based on whether PPN input is needed
+                    if invoice_ppn == 'added':
+                        col_no_disc1, col_no_disc2, col_no_disc3, col_no_disc4 = st.columns([0.8, 1.5, 1.2, 0.5])
+                    else:
+                        col_no_disc2, col_no_disc3, col_no_disc4 = st.columns([2, 1.5, 0.5])
+                        col_no_disc1 = None  # No PPN input column when included
+
+                    # PPN % input (only when PPN is added)
+                    if invoice_ppn == 'added' and col_no_disc1:
+                        with col_no_disc1:
+                            edit_item_ppn_rate_nodisc = st.number_input(
+                                "PPN %",
+                                min_value=0.0,
+                                max_value=100.0,
+                                value=supplier_ppn_rate,
+                                step=0.5,
+                                key=f"edit_item_ppn_pct_nodisc_{invoice_to_edit.supplier.id}",
+                                label_visibility="collapsed"
+                            )
+                            st.caption("PPN %")
+                    else:
+                        edit_item_ppn_rate_nodisc = 0.0
 
                     # Calculate preview if qty and price are entered
                     edit_ppn_preview = 0
@@ -2369,23 +2445,15 @@ def show_invoices_supplies():
                             price = float(edit_item_price.replace('.', '').replace(',', '.'))
                             subtotal = qty * price
 
-                            # Get supplier's PPN rate
-                            db = next(get_db())
-                            selected_supplier_obj = db.query(Supplier).filter(Supplier.id == invoice_to_edit.supplier.id).first()
-                            db.close()
-
-                            ppn_rate = selected_supplier_obj.ppn_rate or 0.0
-                            invoice_ppn = invoice_to_edit.ppn_handling or selected_supplier_obj.ppn_handling
-
                             # Calculate PPN if "added"
                             if invoice_ppn == 'added':
-                                edit_ppn_preview = subtotal * (ppn_rate / 100)
+                                edit_ppn_preview = subtotal * (edit_item_ppn_rate_nodisc / 100)
 
                             edit_total_preview = subtotal + edit_ppn_preview
                         except:
                             pass
 
-                    with col_no_disc1:
+                    with col_no_disc2:
                         st.text_input(
                             "PPN Amount",
                             value=f"{format_currency(edit_ppn_preview)}" if edit_ppn_preview > 0 else "No PPN",
@@ -2393,9 +2461,9 @@ def show_invoices_supplies():
                             disabled=True,
                             label_visibility="collapsed"
                         )
-                        st.caption("PPN")
+                        st.caption("PPN Amt")
 
-                    with col_no_disc2:
+                    with col_no_disc3:
                         st.text_input(
                             "Line Total",
                             value=format_currency(edit_total_preview) if edit_total_preview > 0 else "-",
@@ -2405,7 +2473,7 @@ def show_invoices_supplies():
                         )
                         st.caption("Total")
 
-                    with col_no_disc3:
+                    with col_no_disc4:
                         if st.button("➕", key="edit_add_item_no_discount_btn", help="Add item", use_container_width=True):
                             if edit_item_qty and edit_item_price:
                                 try:
@@ -2414,18 +2482,10 @@ def show_invoices_supplies():
                                     price = float(edit_item_price.replace('.', '').replace(',', '.'))
                                     subtotal = qty * price
 
-                                    # Get PPN rate and handling
-                                    db = next(get_db())
-                                    selected_supplier_obj = db.query(Supplier).filter(Supplier.id == invoice_to_edit.supplier.id).first()
-                                    db.close()
-
-                                    ppn_rate = selected_supplier_obj.ppn_rate or 0.0
-                                    invoice_ppn = invoice_to_edit.ppn_handling or selected_supplier_obj.ppn_handling
-
                                     # Calculate PPN
                                     ppn_amt = 0
                                     if invoice_ppn == 'added':
-                                        ppn_amt = subtotal * (ppn_rate / 100)
+                                        ppn_amt = subtotal * (edit_item_ppn_rate_nodisc / 100)
 
                                     line_total = subtotal + ppn_amt
 
@@ -2435,7 +2495,7 @@ def show_invoices_supplies():
                                         'unit': selected_product.unit,
                                         'unit_price': price,
                                         'discount_percentage': None,
-                                        'ppn_percentage': ppn_rate if invoice_ppn == 'added' else 0.0,
+                                        'ppn_percentage': edit_item_ppn_rate_nodisc if invoice_ppn == 'added' else 0.0,
                                         'ppn_amount': ppn_amt,
                                         'total': line_total,
                                         'product_id': selected_product.id
