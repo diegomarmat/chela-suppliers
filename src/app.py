@@ -4550,83 +4550,52 @@ def show_capex_section(page):
 
 def main():
     # Sidebar navigation
-    st.sidebar.markdown("### 💰 Chela Expenses")
+    st.sidebar.markdown("### 📦 Chela Suppliers")
     st.sidebar.markdown("---")
 
-    # Top-level expense category selector
-    expense_category = st.sidebar.selectbox(
-        "📂 Expense Category",
-        ["COGS", "OVERHEAD", "CAPEX"],
-        help="COGS = Cost of Goods Sold (ingredients, production)\nOVERHEAD = Operational expenses\nCAPEX = Equipment & assets"
+    page = st.sidebar.radio(
+        "Navigation",
+        ["Dashboard", "Suppliers", "Market List", "Invoices", "Payments", "Analytics"]
     )
 
-    st.sidebar.markdown("---")
-
-    # ========== COGS SECTION ==========
-    if expense_category == "COGS":
-        st.sidebar.markdown("**🍳 Cost of Goods Sold**")
-        st.sidebar.caption("Ingredients & production supplies")
-
-        page = st.sidebar.radio(
-            "Navigation",
-            ["Dashboard", "Suppliers", "Market List", "Invoices", "Payments", "Analytics"],
-            key="cogs_nav"
-        )
-
-
-        # Analytics submenu
-        if page == "Analytics":
-            st.sidebar.markdown("---")
-            analytics_page = st.sidebar.radio(
-                "📈 Analytics",
-                ["Purchase Tracking", "Price Tracking"]
-            )
-
+    # Invoices submenu
+    if page == "Invoices":
         st.sidebar.markdown("---")
-        st.sidebar.markdown("**Quick Stats**")
-        stats = get_stats()
-        st.sidebar.metric("Total Suppliers", stats['total_suppliers'])
-        st.sidebar.metric("Total Invoices", stats['total_invoices'])
+        invoices_page = st.sidebar.radio(
+            "🧾 Invoices",
+            ["Supplies", "Others"]
+        )
 
-        # Route to appropriate COGS page
-        if page == "Dashboard":
-            show_dashboard()
-        elif page == "Suppliers":
-            show_suppliers()
-        elif page == "Market List":
-            show_market_list()
-        elif page == "Invoices":
+    # Analytics submenu
+    if page == "Analytics":
+        st.sidebar.markdown("---")
+        analytics_page = st.sidebar.radio(
+            "📈 Analytics",
+            ["Purchase Tracking", "Price Tracking"]
+        )
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("**Quick Stats**")
+    stats = get_stats()
+    st.sidebar.metric("Total Suppliers", stats['total_suppliers'])
+    st.sidebar.metric("Total Invoices", stats['total_invoices'])
+
+    # Route to appropriate page
+    if page == "Dashboard":
+        show_dashboard()
+    elif page == "Suppliers":
+        show_suppliers()
+    elif page == "Market List":
+        show_market_list()
+    elif page == "Invoices":
+        if invoices_page == "Supplies":
             show_invoices_supplies()
-        elif page == "Payments":
-            show_payments()
-        elif page == "Analytics":
-            show_analytics(analytics_page)
-
-    # ========== OVERHEAD SECTION ==========
-    elif expense_category == "OVERHEAD":
-        st.sidebar.markdown("**🏢 Operational Overhead**")
-        st.sidebar.caption("Trash, electricity, cleaning, etc.")
-
-        page = st.sidebar.radio(
-            "Navigation",
-            ["Overview", "Vendors", "Expenses", "Payments"],
-            key="overhead_nav"
-        )
-
-        show_overhead_section(page)
-
-    # ========== CAPEX SECTION ==========
-    elif expense_category == "CAPEX":
-        st.sidebar.markdown("**🔧 Capital Expenditures**")
-        st.sidebar.caption("Equipment, furniture, maintenance")
-
-        page = st.sidebar.radio(
-            "Navigation",
-            ["Overview", "Assets", "Expenses", "Maintenance Log"],
-            key="capex_nav"
-        )
-
-        show_capex_section(page)
+        else:  # Others
+            show_invoices_others()
+    elif page == "Payments":
+        show_payments()
+    elif page == "Analytics":
+        show_analytics(analytics_page)
 
 
 if __name__ == "__main__":
