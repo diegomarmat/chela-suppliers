@@ -198,9 +198,9 @@ def calculate_due_date(invoice_date, payment_terms):
 
     elif payment_terms == '2week':
         # Month split in half: pay on 15th and end of month
-        # If invoice before 15th -> due on 15th
-        # If invoice on or after 15th -> due end of month
-        if invoice_date.day < 15:
+        # If invoice 1st-15th (inclusive) -> due on 15th
+        # If invoice 16th-end of month -> due end of month
+        if invoice_date.day <= 15:
             return date(invoice_date.year, invoice_date.month, 15)
         else:
             # Last day of the month
@@ -4336,57 +4336,297 @@ def show_price_tracking():
 
 
 # ============================================================================
+# OVERHEAD SECTION (Operational Expenses)
+# ============================================================================
+
+def show_overhead_section(page):
+    """Display OVERHEAD (operational expenses) pages"""
+
+    if page == "Overview":
+        st.title("🏢 Operational Overhead")
+        st.markdown("---")
+
+        st.info("""
+        **What goes here:**
+        - Trash pickup
+        - Electricity bills
+        - Water bills
+        - Cleaning services
+        - Gardener
+        - Pest control
+        - Internet/phone
+        - And other operational expenses...
+        """)
+
+        st.markdown("### 🚧 Under Development")
+        st.markdown("""
+        This section will track all operational expenses that are NOT related to food/drink production.
+
+        **Planned features:**
+        - Simple vendor management (name, contact, typical amount)
+        - Easy expense entry (who, how much, when to pay)
+        - Payment tracking
+        - Monthly/yearly totals for P&L
+        """)
+
+        st.markdown("---")
+        st.markdown("### 💡 What would be useful here?")
+        st.text_area(
+            "Share your ideas for this section:",
+            placeholder="What information do you need to track for operational expenses? How do you currently manage these?",
+            key="overhead_feedback"
+        )
+
+    elif page == "Vendors":
+        st.title("🏢 Overhead Vendors")
+        st.markdown("---")
+
+        st.info("**Coming soon:** Manage vendors for operational expenses (trash, electricity, cleaning, etc.)")
+
+        st.markdown("### What we're thinking:")
+        st.markdown("""
+        Unlike ingredient suppliers, operational vendors are simpler:
+        - **Name** (e.g., "PLN" for electricity)
+        - **Contact** (phone/email)
+        - **Typical amount** (if fixed monthly)
+        - **Payment cycle** (when bills typically come)
+        - **Notes**
+        """)
+
+        st.markdown("---")
+        st.markdown("### 📝 Your current operational vendors")
+        st.text_area(
+            "List the vendors you want to track here:",
+            placeholder="Example:\n- PLN (electricity)\n- Trash pickup guy\n- Water tank delivery\n- Gardener Wayan\n- etc...",
+            key="overhead_vendors_list",
+            height=200
+        )
+
+    elif page == "Expenses":
+        st.title("💸 Overhead Expenses")
+        st.markdown("---")
+
+        st.info("**Coming soon:** Enter and track operational expenses")
+
+        st.markdown("### What we're thinking:")
+        st.markdown("""
+        Simple expense entry - not like invoices with line items:
+        - **Vendor** (select from list)
+        - **Date** (when paid or due)
+        - **Amount** (how much)
+        - **Status** (paid/pending)
+        - **Notes** (optional)
+
+        Much simpler than supply invoices because there's no products, quantities, or price tracking needed.
+        """)
+
+    elif page == "Payments":
+        st.title("💳 Overhead Payments")
+        st.markdown("---")
+
+        st.info("**Coming soon:** Track what operational bills need to be paid")
+
+        st.markdown("### What we're thinking:")
+        st.markdown("""
+        - List of upcoming operational payments
+        - Mark as paid when done
+        - Monthly totals for P&L calculation
+        """)
+
+
+# ============================================================================
+# CAPEX SECTION (Capital Expenditures)
+# ============================================================================
+
+def show_capex_section(page):
+    """Display CAPEX (capital expenditures) pages"""
+
+    if page == "Overview":
+        st.title("🔧 Capital Expenditures")
+        st.markdown("---")
+
+        st.info("""
+        **What goes here:**
+        - Equipment purchases (ovens, fridges, etc.)
+        - Furniture (tables, chairs, etc.)
+        - Construction/renovations
+        - Major repairs
+        - Vehicles
+        - And other capital investments...
+        """)
+
+        st.markdown("### 🚧 Under Development")
+        st.markdown("""
+        This section will track big purchases and investments that are NOT regular operating expenses.
+
+        **Planned features:**
+        - Asset registry (what you own)
+        - Purchase tracking (when bought, how much)
+        - Depreciation tracking (for accounting)
+        - Maintenance log (repairs and upkeep)
+        """)
+
+        st.markdown("---")
+        st.markdown("### 💡 What would be useful here?")
+        st.text_area(
+            "Share your ideas for this section:",
+            placeholder="What equipment/assets do you need to track? What information is important?",
+            key="capex_feedback"
+        )
+
+    elif page == "Assets":
+        st.title("📦 Assets & Equipment")
+        st.markdown("---")
+
+        st.info("**Coming soon:** Track equipment, furniture, and other assets")
+
+        st.markdown("### What we're thinking:")
+        st.markdown("""
+        Asset registry:
+        - **Name** (e.g., "Main Oven", "Bar Fridge #2")
+        - **Category** (Kitchen, Bar, Furniture, etc.)
+        - **Purchase date**
+        - **Purchase price**
+        - **Vendor/source**
+        - **Location** (where in the restaurant)
+        - **Condition** (working, needs repair, etc.)
+        - **Notes**
+        """)
+
+        st.markdown("---")
+        st.markdown("### 📝 Major equipment you want to track")
+        st.text_area(
+            "List the main equipment/assets:",
+            placeholder="Example:\n- Wood fire oven\n- Walk-in fridge\n- Ice machine\n- Coffee machine\n- etc...",
+            key="capex_assets_list",
+            height=200
+        )
+
+    elif page == "Expenses":
+        st.title("💰 Capital Expenses")
+        st.markdown("---")
+
+        st.info("**Coming soon:** Track equipment purchases and capital investments")
+
+        st.markdown("### What we're thinking:")
+        st.markdown("""
+        Capital expense entry:
+        - **What** (equipment/asset name)
+        - **Vendor** (where purchased)
+        - **Date**
+        - **Amount**
+        - **Category** (Equipment, Furniture, Construction, etc.)
+        - **Payment status**
+        - **Notes/receipts**
+        """)
+
+    elif page == "Maintenance Log":
+        st.title("🛠️ Maintenance Log")
+        st.markdown("---")
+
+        st.info("**Coming soon:** Track repairs and maintenance for equipment")
+
+        st.markdown("### What we're thinking:")
+        st.markdown("""
+        Keep history of repairs and maintenance:
+        - **Equipment** (which asset)
+        - **Date**
+        - **Issue** (what was wrong)
+        - **Fix** (what was done)
+        - **Cost**
+        - **Who did it** (internal/vendor)
+        - **Next scheduled maintenance**
+
+        This helps:
+        - Know when equipment needs replacing
+        - Budget for maintenance
+        - Track repair costs per equipment
+        """)
+
+
+# ============================================================================
 # MAIN APP
 # ============================================================================
 
 def main():
     # Sidebar navigation
-    st.sidebar.markdown("### 📦 Chela Suppliers")
+    st.sidebar.markdown("### 💰 Chela Expenses")
     st.sidebar.markdown("---")
 
-    page = st.sidebar.radio(
-        "Navigation",
-        ["Dashboard", "Suppliers", "Market List", "Invoices", "Payments", "Analytics"]
+    # Top-level expense category selector
+    expense_category = st.sidebar.selectbox(
+        "📂 Expense Category",
+        ["COGS", "OVERHEAD", "CAPEX"],
+        help="COGS = Cost of Goods Sold (ingredients, production)\nOVERHEAD = Operational expenses\nCAPEX = Equipment & assets"
     )
 
-    # Invoices submenu
-    if page == "Invoices":
-        st.sidebar.markdown("---")
-        invoices_page = st.sidebar.radio(
-            "🧾 Invoices",
-            ["Supplies", "Others"]
-        )
-
-    # Analytics submenu
-    if page == "Analytics":
-        st.sidebar.markdown("---")
-        analytics_page = st.sidebar.radio(
-            "📈 Analytics",
-            ["Purchase Tracking", "Price Tracking"]
-        )
-
     st.sidebar.markdown("---")
-    st.sidebar.markdown("**Quick Stats**")
-    stats = get_stats()
-    st.sidebar.metric("Total Suppliers", stats['total_suppliers'])
-    st.sidebar.metric("Total Invoices", stats['total_invoices'])
 
-    # Route to appropriate page
-    if page == "Dashboard":
-        show_dashboard()
-    elif page == "Suppliers":
-        show_suppliers()
-    elif page == "Market List":
-        show_market_list()
-    elif page == "Invoices":
-        if invoices_page == "Supplies":
+    # ========== COGS SECTION ==========
+    if expense_category == "COGS":
+        st.sidebar.markdown("**🍳 Cost of Goods Sold**")
+        st.sidebar.caption("Ingredients & production supplies")
+
+        page = st.sidebar.radio(
+            "Navigation",
+            ["Dashboard", "Suppliers", "Market List", "Invoices", "Payments", "Analytics"],
+            key="cogs_nav"
+        )
+
+
+        # Analytics submenu
+        if page == "Analytics":
+            st.sidebar.markdown("---")
+            analytics_page = st.sidebar.radio(
+                "📈 Analytics",
+                ["Purchase Tracking", "Price Tracking"]
+            )
+
+        st.sidebar.markdown("---")
+        st.sidebar.markdown("**Quick Stats**")
+        stats = get_stats()
+        st.sidebar.metric("Total Suppliers", stats['total_suppliers'])
+        st.sidebar.metric("Total Invoices", stats['total_invoices'])
+
+        # Route to appropriate COGS page
+        if page == "Dashboard":
+            show_dashboard()
+        elif page == "Suppliers":
+            show_suppliers()
+        elif page == "Market List":
+            show_market_list()
+        elif page == "Invoices":
             show_invoices_supplies()
-        else:  # Others
-            show_invoices_others()
-    elif page == "Payments":
-        show_payments()
-    elif page == "Analytics":
-        show_analytics(analytics_page)
+        elif page == "Payments":
+            show_payments()
+        elif page == "Analytics":
+            show_analytics(analytics_page)
+
+    # ========== OVERHEAD SECTION ==========
+    elif expense_category == "OVERHEAD":
+        st.sidebar.markdown("**🏢 Operational Overhead**")
+        st.sidebar.caption("Trash, electricity, cleaning, etc.")
+
+        page = st.sidebar.radio(
+            "Navigation",
+            ["Overview", "Vendors", "Expenses", "Payments"],
+            key="overhead_nav"
+        )
+
+        show_overhead_section(page)
+
+    # ========== CAPEX SECTION ==========
+    elif expense_category == "CAPEX":
+        st.sidebar.markdown("**🔧 Capital Expenditures**")
+        st.sidebar.caption("Equipment, furniture, maintenance")
+
+        page = st.sidebar.radio(
+            "Navigation",
+            ["Overview", "Assets", "Expenses", "Maintenance Log"],
+            key="capex_nav"
+        )
+
+        show_capex_section(page)
 
 
 if __name__ == "__main__":
