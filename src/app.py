@@ -1765,7 +1765,7 @@ def show_invoices_supplies():
                 else:
                     st.caption(f"📋 Total invoices: {len(invoices)}")
 
-                # Calculate total amount for PDF
+                # Store data for PDF export (only generate when button clicked)
                 total_amount = sum(inv.total_amount or 0 for inv in invoices)
 
                 # Build filters text for PDF
@@ -1777,28 +1777,28 @@ def show_invoices_supplies():
                 if filter_year != "All":
                     filters_parts.append(f"Year: {filter_year}")
                 if filter_month != "All":
-                    month_name = date(2025, filter_month, 1).strftime('%B')
-                    filters_parts.append(f"Month: {month_name}")
+                    month_name_pdf = date(2025, filter_month, 1).strftime('%B')
+                    filters_parts.append(f"Month: {month_name_pdf}")
                 if filter_payment_cycle != "All":
                     filters_parts.append(f"Payment: {filter_payment_cycle}")
 
                 filters_text = " | ".join(filters_parts) if filters_parts else "All Invoices"
 
-                # PDF download button
-                pdf_buffer = generate_invoice_list_pdf(
-                    invoice_data,
-                    filters_text,
-                    total_amount,
-                    len(invoices)
-                )
-
-                st.download_button(
-                    label="📄 Export PDF",
-                    data=pdf_buffer,
-                    file_name=f"invoice_report_{date.today().strftime('%Y%m%d')}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True
-                )
+                # Create expander for PDF export to avoid generating on every render
+                with st.expander("📄 Export to PDF"):
+                    if st.button("Generate PDF Report", key="gen_invoice_pdf"):
+                        pdf_buffer = generate_invoice_list_pdf(
+                            invoice_data,
+                            filters_text,
+                            total_amount,
+                            len(invoices)
+                        )
+                        st.download_button(
+                            label="⬇️ Download PDF",
+                            data=pdf_buffer,
+                            file_name=f"invoice_report_{date.today().strftime('%Y%m%d')}.pdf",
+                            mime="application/pdf"
+                        )
             else:
                 st.info("No invoices match your filters.")
         finally:
