@@ -3273,12 +3273,18 @@ def show_payments():
 
             # Filter by due date within the month (payment cycle)
             if payment_cycle == "15th (Mid-month)":
-                # Only invoices due on the 15th
-                query = query.filter(extract('day', Invoice.due_date) == 15)
+                # Only 2-week suppliers with invoices due on the 15th (exclude cash - already paid)
+                query = query.join(Supplier).filter(
+                    extract('day', Invoice.due_date) == 15,
+                    Supplier.payment_terms != 'cash'
+                )
             elif payment_cycle == "End of Month":
-                # Only invoices due after the 15th (end of month payments)
-                query = query.filter(extract('day', Invoice.due_date) > 15)
-            # If "All", include all due dates in the month
+                # Only 2-week/monthly suppliers due after the 15th (exclude cash - already paid)
+                query = query.join(Supplier).filter(
+                    extract('day', Invoice.due_date) > 15,
+                    Supplier.payment_terms != 'cash'
+                )
+            # If "All", include all due dates in the month (including cash)
 
             invoices = query.all()
 
