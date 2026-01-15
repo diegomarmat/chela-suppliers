@@ -220,6 +220,107 @@ def format_date_input(date_obj):
     return ""
 
 
+def generate_invoice_list_pdf(invoice_data, filters_text, total_amount, invoice_count):
+    """Generate PDF for invoice list report"""
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    elements = []
+
+    # Styles
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle(
+        'CustomTitle',
+        parent=styles['Heading1'],
+        fontSize=18,
+        textColor=colors.HexColor('#2C1810'),
+        spaceAfter=30,
+        alignment=1  # Center
+    )
+    subtitle_style = ParagraphStyle(
+        'CustomSubtitle',
+        parent=styles['Normal'],
+        fontSize=12,
+        textColor=colors.HexColor('#5D4037'),
+        spaceAfter=20,
+        alignment=1  # Center
+    )
+
+    # Title
+    title = Paragraph("CHELA<br/>Invoice Report", title_style)
+    elements.append(title)
+
+    # Subtitle with filters
+    subtitle = Paragraph(filters_text, subtitle_style)
+    elements.append(subtitle)
+    elements.append(Spacer(1, 0.3 * inch))
+
+    # Table data
+    table_data = [['Invoice #', 'Supplier', 'Date', 'Due Date', 'Amount']]
+    for row in invoice_data:
+        table_data.append([
+            row['Invoice #'].replace('⚠️ ', ''),  # Remove emoji for PDF
+            row['Supplier'],
+            row['Date'],
+            row['Due Date'],
+            row['Amount']
+        ])
+
+    # Create table
+    table = Table(table_data, colWidths=[1.2*inch, 2*inch, 1.2*inch, 1.2*inch, 1.4*inch])
+    table.setStyle(TableStyle([
+        # Header styling
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#5D4037')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('ALIGN', (4, 0), (4, -1), 'RIGHT'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 11),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('TOPPADDING', (0, 0), (-1, 0), 12),
+
+        # Data rows styling
+        ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 1), (-1, -1), 9),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.beige]),
+        ('TOPPADDING', (0, 1), (-1, -1), 6),
+        ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+    ]))
+
+    elements.append(table)
+    elements.append(Spacer(1, 0.5 * inch))
+
+    # Summary section
+    summary_data = [
+        ['Total Invoices', str(invoice_count)],
+        ['Total Amount', format_currency(total_amount)]
+    ]
+    summary_table = Table(summary_data, colWidths=[3*inch, 3*inch])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#F8F9FA')),
+        ('TEXTCOLOR', (0, 0), (-1, -1), colors.HexColor('#2E4057')),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+        ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 12),
+        ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+        ('TOPPADDING', (0, 0), (-1, -1), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+    ]))
+    elements.append(summary_table)
+
+    # Footer
+    elements.append(Spacer(1, 0.5 * inch))
+    footer_text = f"Generated on {datetime.now().strftime('%d/%m/%Y at %H:%M')}"
+    footer = Paragraph(footer_text, styles['Normal'])
+    elements.append(footer)
+
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+
 def generate_payment_schedule_pdf(report_data, month_name, cycle_name, total_amount, review_count, category_filter):
     """Generate PDF for payment schedule report"""
     buffer = io.BytesIO()
@@ -1663,6 +1764,41 @@ def show_invoices_supplies():
                     st.caption(f"📋 Total invoices: {len(invoices)} ({review_count} need review ⚠️)")
                 else:
                     st.caption(f"📋 Total invoices: {len(invoices)}")
+
+                # Calculate total amount for PDF
+                total_amount = sum(inv.total_amount or 0 for inv in invoices)
+
+                # Build filters text for PDF
+                filters_parts = []
+                if filter_supplier != "All":
+                    filters_parts.append(f"Supplier: {filter_supplier}")
+                if filter_category != "All":
+                    filters_parts.append(f"Category: {filter_category}")
+                if filter_year != "All":
+                    filters_parts.append(f"Year: {filter_year}")
+                if filter_month != "All":
+                    month_name = date(2025, filter_month, 1).strftime('%B')
+                    filters_parts.append(f"Month: {month_name}")
+                if filter_payment_cycle != "All":
+                    filters_parts.append(f"Payment: {filter_payment_cycle}")
+
+                filters_text = " | ".join(filters_parts) if filters_parts else "All Invoices"
+
+                # PDF download button
+                pdf_buffer = generate_invoice_list_pdf(
+                    invoice_data,
+                    filters_text,
+                    total_amount,
+                    len(invoices)
+                )
+
+                st.download_button(
+                    label="📄 Export PDF",
+                    data=pdf_buffer,
+                    file_name=f"invoice_report_{date.today().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
             else:
                 st.info("No invoices match your filters.")
         finally:
