@@ -5,7 +5,10 @@ Created: December 21, 2025
 """
 
 import streamlit as st
+import streamlit_authenticator as stauth
 import pandas as pd
+import yaml
+from yaml.loader import SafeLoader
 from datetime import datetime, date, timedelta
 from models import (
     get_db, Supplier, Invoice, InvoiceItem, Product, PriceHistory, DashboardNotes, init_db, engine
@@ -111,7 +114,7 @@ pillow_heif.register_heif_opener()
 
 # Page configuration
 st.set_page_config(
-    page_title="Chela Suppliers",
+    page_title="Chela Expenses",
     page_icon="📦",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -155,6 +158,88 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+
+# ============================================================================
+# AUTHENTICATION
+# ============================================================================
+
+def get_auth_config():
+    """Get authentication config"""
+    return {
+        'credentials': {
+            'usernames': {
+                'diego': {
+                    'name': 'Diego',
+                    'password': '$2b$12$x4FjXoa0m/qRElFONGa9guFRU305NtRp682iqGB1gJG0Or86ni7B.',
+                    'role': 'admin'
+                },
+                'marcella': {
+                    'name': 'Marcella',
+                    'password': '$2b$12$pOrGMqVWHQ3F91q9AxquveMgzuARc4wEhlIok40SBrBNMyre8bOA.',
+                    'role': 'admin'
+                },
+                'dian': {
+                    'name': 'Dian',
+                    'password': '$2b$12$gqYJYjPLKDxQGv784JQmT.KIrkPaw4yZOW2P0qsnwD7ijyeZ8.1Sa',
+                    'role': 'hr'
+                },
+                'astik': {
+                    'name': 'Astik',
+                    'password': '$2b$12$ppERYa/1M/haJa3VjUjqmOslODo1mR926eiK4cpd1eL0D86QjLbqa',
+                    'role': 'expenses'
+                }
+            }
+        },
+        'cookie': {
+            'name': 'chela_expenses_auth',
+            'key': 'chela_expenses_secret_key_2026',
+            'expiry_days': 30
+        },
+        'preauthorized': {'emails': []}
+    }
+
+
+def check_authentication():
+    """Check if user is authenticated. Returns True if logged in."""
+    config = get_auth_config()
+
+    authenticator = stauth.Authenticate(
+        config['credentials'],
+        config['cookie']['name'],
+        config['cookie']['key'],
+        config['cookie']['expiry_days'],
+        config.get('preauthorized', {})
+    )
+
+    authenticator.login(location='main')
+
+    authentication_status = st.session_state.get('authentication_status')
+    name = st.session_state.get('name')
+    username = st.session_state.get('username')
+
+    if authentication_status == False:
+        st.error('Username or password is incorrect')
+        return False, None, authenticator
+
+    if authentication_status == None:
+        st.warning('Please enter your username and password')
+        return False, None, authenticator
+
+    # Check role - only admin and expenses can access Expenses platform
+    user_role = config['credentials']['usernames'].get(username, {}).get('role', '')
+    if user_role not in ['admin', 'expenses']:
+        st.error('You do not have access to Expenses Platform')
+        authenticator.logout(location='main')
+        return False, None, authenticator
+
+    st.session_state['role'] = user_role
+    return True, authenticator, authenticator
+
+
+def get_current_user():
+    """Get currently logged in username"""
+    return st.session_state.get('username', 'unknown')
 
 
 # ============================================================================
@@ -4691,8 +4776,18 @@ def show_capex_section(page):
 # ============================================================================
 
 def main():
+    # Check authentication first
+    is_authenticated, authenticator, _ = check_authentication()
+
+    if not is_authenticated:
+        st.stop()
+
     # Sidebar navigation
-    st.sidebar.markdown("### 📦 Chela Suppliers")
+    st.sidebar.markdown("### 📦 Chela Expenses")
+
+    # Show logged in user and logout
+    st.sidebar.markdown(f"**Logged in as:** {st.session_state.get('name', 'Unknown')}")
+    authenticator.logout(location='sidebar')
     st.sidebar.markdown("---")
 
     page = st.sidebar.radio(
