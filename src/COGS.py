@@ -114,7 +114,7 @@ pillow_heif.register_heif_opener()
 
 # Page configuration
 st.set_page_config(
-    page_title="Chela Expenses",
+    page_title="Chela Expenses - COGS",
     page_icon="📦",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -4783,7 +4783,8 @@ def main():
         st.stop()
 
     # Sidebar navigation
-    st.sidebar.markdown("### 📦 Chela Expenses")
+    st.sidebar.markdown("### 📦 COGS")
+    st.sidebar.caption("Cost of Goods Sold")
 
     # Show logged in user and logout
     st.sidebar.markdown(f"**Logged in as:** {st.session_state.get('name', 'Unknown')}")
@@ -4794,14 +4795,6 @@ def main():
         "Navigation",
         ["Dashboard", "Suppliers", "Market List", "Invoices", "Payments", "Analytics"]
     )
-
-    # Invoices submenu
-    if page == "Invoices":
-        st.sidebar.markdown("---")
-        invoices_page = st.sidebar.radio(
-            "🧾 Invoices",
-            ["Supplies", "Others"]
-        )
 
     # Analytics submenu
     if page == "Analytics":
@@ -4825,10 +4818,7 @@ def main():
     elif page == "Market List":
         show_market_list()
     elif page == "Invoices":
-        if invoices_page == "Supplies":
-            show_invoices_supplies()
-        else:  # Others
-            show_invoices_others()
+        show_invoices_supplies()
     elif page == "Payments":
         show_payments()
     elif page == "Analytics":

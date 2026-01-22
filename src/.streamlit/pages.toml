@@ -1,0 +1,13 @@
+[pages]
+
+[pages.app]
+name = "COGS"
+icon = "📦"
+
+[pages.1_Overhead]
+name = "Overhead"
+icon = "🏢"
+
+[pages.2_Capex]
+name = "CAPEX"
+icon = "🔧"

@@ -1,1 +1,1 @@
-web: cd src && streamlit run app.py --server.port=$PORT --server.address=0.0.0.0
+web: cd src && streamlit run COGS.py --server.port=$PORT --server.address=0.0.0.0
