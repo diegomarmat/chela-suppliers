@@ -230,6 +230,97 @@ class DashboardNotes(Base):
 
 
 # ============================================================================
+# OVERHEAD MODELS
+# ============================================================================
+
+class OverheadVendor(Base):
+    """Overhead vendors - operational service providers (PLN, PDAM, gardener, etc.)"""
+    __tablename__ = "overhead_vendors"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False, unique=True)
+    category = Column(String, nullable=False)  # Utilities, Cleaning, Security, Communication, Other
+    contact = Column(String)
+    payment_cycle = Column(String)  # Monthly, Bi-weekly, Weekly, As needed
+    payment_terms = Column(String, default='cash')  # cash, 2week, monthly
+    responsible = Column(String)  # Diego, Marcella, Admin
+    bank_name = Column(String)
+    bank_account_number = Column(String)
+    bank_account_name = Column(String)
+    notes = Column(Text)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+    def __repr__(self):
+        return f"<OverheadVendor(id={self.id}, name='{self.name}')>"
+
+
+class OverheadExpense(Base):
+    """Overhead expenses - individual overhead cost entries"""
+    __tablename__ = "overhead_expenses"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    vendor_id = Column(Integer, ForeignKey("overhead_vendors.id"), nullable=False)
+    amount = Column(Float, nullable=False)
+    expense_date = Column(Date, nullable=False)
+    month = Column(Integer, nullable=False)
+    year = Column(Integer, nullable=False)
+    description = Column(String)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    vendor = relationship("OverheadVendor", backref="expenses")
+
+    def __repr__(self):
+        return f"<OverheadExpense(id={self.id}, vendor_id={self.vendor_id}, amount={self.amount})>"
+
+
+# ============================================================================
+# CAPEX MODELS
+# ============================================================================
+
+class CapexVendor(Base):
+    """CAPEX vendors - suppliers for capital expenditures"""
+    __tablename__ = "capex_vendors"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False, unique=True)
+    category = Column(String, nullable=False)
+    contact = Column(String)
+    payment_terms = Column(String, default='cash')  # cash, 2week, monthly
+    responsible = Column(String)  # Diego, Marcella, Admin
+    bank_name = Column(String)
+    bank_account_number = Column(String)
+    bank_account_name = Column(String)
+    notes = Column(Text)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.now)
+
+    def __repr__(self):
+        return f"<CapexVendor(id={self.id}, name='{self.name}')>"
+
+
+class CapexExpense(Base):
+    """CAPEX expenses - individual capital expenditure entries"""
+    __tablename__ = "capex_expenses"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    vendor_id = Column(Integer, ForeignKey("capex_vendors.id"), nullable=False)
+    amount = Column(Float, nullable=False)
+    expense_date = Column(Date, nullable=False)
+    month = Column(Integer, nullable=False)
+    year = Column(Integer, nullable=False)
+    description = Column(String)
+    created_at = Column(DateTime, default=datetime.now)
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+    vendor = relationship("CapexVendor", backref="expenses")
+
+    def __repr__(self):
+        return f"<CapexExpense(id={self.id}, vendor_id={self.vendor_id}, amount={self.amount})>"
+
+
+# ============================================================================
 # DATABASE SESSION HELPER
 # ============================================================================
 
@@ -246,9 +337,41 @@ def get_db():
 # INITIALIZATION
 # ============================================================================
 
+def migrate_db():
+    """Add new columns to existing tables without dropping data."""
+    from sqlalchemy import inspect, text
+    inspector = inspect(engine)
+    if 'overhead_vendors' not in inspector.get_table_names():
+        return
+    existing = {col['name'] for col in inspector.get_columns('overhead_vendors')}
+    new_columns = [
+        ('payment_terms', 'VARCHAR'),
+        ('responsible', 'VARCHAR'),
+        ('bank_name', 'VARCHAR'),
+        ('bank_account_number', 'VARCHAR'),
+        ('bank_account_name', 'VARCHAR'),
+    ]
+    with engine.begin() as conn:
+        for col_name, col_type in new_columns:
+            if col_name not in existing:
+                conn.execute(text(f"ALTER TABLE overhead_vendors ADD COLUMN {col_name} {col_type}"))
+
+    # Drop status/paid_date from overhead_expenses if they exist
+    if 'overhead_expenses' in inspector.get_table_names():
+        exp_existing = {col['name'] for col in inspector.get_columns('overhead_expenses')}
+        with engine.begin() as conn:
+            for col in ['status', 'paid_date']:
+                if col in exp_existing:
+                    try:
+                        conn.execute(text(f"ALTER TABLE overhead_expenses DROP COLUMN {col}"))
+                    except Exception:
+                        pass
+
+
 def init_db():
     """Initialize database tables (if not exists)"""
     Base.metadata.create_all(bind=engine)
+    migrate_db()
     print("✅ Database initialized successfully")
 
 
