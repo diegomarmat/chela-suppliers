@@ -92,7 +92,18 @@ def format_currency(amount):
         return "Rp 0"
     return f"Rp {amount:,.0f}"
 
-CATEGORIES = ["Utilities", "Cleaning & Maintenance", "Security", "Communication", "Staff Welfare", "Other"]
+CATEGORIES = [
+    "Utilities",
+    "Cleaning Hygiene & Laundry",
+    "Consumables & Fuel",
+    "Paper & Packaging",
+    "Staff & HR",
+    "Equipment",
+    "Facilities & Gardener",
+    "Maintenance",
+    "Tech & Comms",
+    "Admin & Other",
+]
 MONTHS = ["January", "February", "March", "April", "May", "June",
           "July", "August", "September", "October", "November", "December"]
 
