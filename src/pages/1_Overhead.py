@@ -342,6 +342,7 @@ def show_vendors(db):
         if vendors:
             data = [{
                 "Name": v.name,
+                "Company": v.company_name or "-",
                 "Category": v.category,
                 "Payment Terms": v.payment_terms or "-",
                 "Responsible": v.responsible or "-",
@@ -357,6 +358,7 @@ def show_vendors(db):
             col1, col2 = st.columns(2)
             with col1:
                 vendor_name = st.text_input("Vendor Name *", placeholder="e.g., PLN, PDAM, Wayan (Gardener)")
+                company_name = st.text_input("Company", placeholder="Official company name (optional)")
                 category = st.selectbox("Category *", CATEGORIES)
                 contact = st.text_input("Contact", placeholder="Phone or WhatsApp number")
                 payment_terms = st.selectbox("Payment Terms", ["Cash", "2-Week", "Monthly"])
@@ -377,6 +379,7 @@ def show_vendors(db):
                     else:
                         new_vendor = OverheadVendor(
                             name=vendor_name,
+                            company_name=company_name or None,
                             category=category,
                             contact=contact or None,
                             payment_terms=payment_terms.lower().replace("-", ""),
@@ -408,6 +411,7 @@ def show_vendors(db):
                     col1, col2 = st.columns(2)
                     with col1:
                         new_name = st.text_input("Vendor Name *", value=v.name)
+                        new_company = st.text_input("Company", value=v.company_name or "", placeholder="Official company name (optional)")
                         new_category = st.selectbox("Category *", CATEGORIES,
                             index=CATEGORIES.index(v.category) if v.category in CATEGORIES else 0)
                         new_contact = st.text_input("Contact", value=v.contact or "")
@@ -435,6 +439,7 @@ def show_vendors(db):
                             st.error("Vendor name is required")
                         else:
                             v.name = new_name
+                            v.company_name = new_company or None
                             v.category = new_category
                             v.contact = new_contact or None
                             v.payment_terms = new_payment_terms.lower().replace("-", "")

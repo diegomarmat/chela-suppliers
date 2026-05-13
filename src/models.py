@@ -239,7 +239,8 @@ class OverheadVendor(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False, unique=True)
-    category = Column(String, nullable=False)  # Utilities, Cleaning, Security, Communication, Other
+    company_name = Column(String)
+    category = Column(String, nullable=False)
     contact = Column(String)
     payment_cycle = Column(String)  # Monthly, Bi-weekly, Weekly, As needed
     payment_terms = Column(String, default='cash')  # cash, 2week, monthly
@@ -350,6 +351,7 @@ def migrate_db():
         ('bank_name', 'VARCHAR'),
         ('bank_account_number', 'VARCHAR'),
         ('bank_account_name', 'VARCHAR'),
+        ('company_name', 'VARCHAR'),
     ]
     with engine.begin() as conn:
         for col_name, col_type in new_columns:
