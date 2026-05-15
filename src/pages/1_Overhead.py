@@ -352,6 +352,22 @@ def show_vendors(db):
         else:
             st.info("No vendors yet — add your first one in the 'Add Vendor' tab.")
 
+        # Inactive vendors
+        inactive = db.query(OverheadVendor).filter(OverheadVendor.is_active == False).order_by(OverheadVendor.name).all()
+        if inactive:
+            st.markdown("---")
+            with st.expander(f"Inactive Vendors ({len(inactive)})"):
+                for v in inactive:
+                    col1, col2 = st.columns([4, 1])
+                    with col1:
+                        st.write(f"**{v.name}**" + (f" — {v.company_name}" if v.company_name else "") + f" | {v.category}")
+                    with col2:
+                        if st.button("Reactivate", key=f"reactivate_{v.id}"):
+                            v.is_active = True
+                            db.commit()
+                            st.success(f"'{v.name}' reactivated.")
+                            st.rerun()
+
     with tab2:
         st.markdown("### Add New Vendor")
         with st.form("add_overhead_vendor", clear_on_submit=True):
